@@ -243,6 +243,12 @@ label.fl{display:block;font-family:var(--mono);font-size:10px;letter-spacing:.09
     <div class="mmhead"><b>추세</b><span class="src">최근 40거래일</span></div>
     <div id="sparks"></div>
   </div>
+  <div class="mmwrap" style="margin-top:9px" id="auxWrap" hidden>
+    <div class="mmhead"><b>보조 브레스 — 참고</b><span class="src">맥클렐란 · 누적선</span></div>
+    <div id="auxRows"></div>
+    <div class="mmfoot">오실레이터는 ±70 밖이 극단(－는 매도 극단=반등 관찰, ＋는 과열). 서메이션·A/D·신고저 누적선은 값이 아니라
+    <b>지수와의 방향 불일치(다이버전스)</b>를 보는 용도 — 지수는 신고가인데 누적선이 못 따라오면 참여 종목이 줄고 있다는 뜻입니다.</div>
+  </div>
   <div class="mmwrap" style="margin-top:9px" id="sbWrap" hidden>
     <div class="mmhead"><b>섹터별 4% 돌파 · 오늘</b><span class="src" id="sbSrc"></span></div>
     <div id="secBreadth"></div>
@@ -272,7 +278,7 @@ label.fl{display:block;font-family:var(--mono);font-size:10px;letter-spacing:.09
     <div class="rows" id="rowsKR"></div>
   </div>
 
-  <div class="footer" id="footer">SECTOR + BREADTH · v2.1</div>
+  <div class="footer" id="footer">SECTOR + BREADTH · v2.2</div>
 </div>
 
 <div class="sheet" id="sheet">
@@ -646,6 +652,7 @@ function renderMM(){
       ⋯ 메뉴의 <b>자동 수집</b>을 연결하면 매일 아침 자동으로 들어옵니다.</td></tr>`;
     $("#mmFlags").innerHTML=""; $("#mmFoot").textContent=""; $("#mmSrc").textContent="미연결";
     $("#gauges").innerHTML=""; $("#sparks").innerHTML=`<div class="xs dim" style="padding:12px">—</div>`;
+    $("#auxWrap").hidden=true;
     return;
   }
   const rows=H.slice(-CFG.mmRows).reverse();
@@ -674,6 +681,8 @@ function renderMM(){
   if(isNum(t.r5)){ if(t.r5<0.5)F.push(["bull","5일비 "+t.r5.toFixed(2)+" — 단기 매도 극단"]);
     else if(t.r5>2)F.push(["warn","5일비 "+t.r5.toFixed(2)+" — 단기 과열"]); }
   if(isNum(t.q25u)&&t.q25u<300) F.push(["bull","분기 25%↑ "+fmtI(t.q25u)+" — 300 미만"]);
+  if(isNum(t.mco)){ if(t.mco<-70)F.push(["bull","맥클렐란 "+t.mco.toFixed(0)+" — 매도 극단"]);
+    else if(t.mco>70)F.push(["warn","맥클렐란 +"+t.mco.toFixed(0)+" — 과열"]); }
   if(!F.length) F.push(["neut","극단 없음 — 브레스는 이럴 때 쓸모가 적습니다"]);
   $("#mmFlags").innerHTML=F.map(([c,t])=>`<span class="flag ${c}">${t}</span>`).join("");
 
@@ -699,6 +708,20 @@ function renderMM(){
     g("a200","%>200MA",t.a200,0,100,"장기 추세 폭");
 
   /* 스파크 */
+  const spLine=(label,vals,color,dec,zero)=>{
+    const v2=vals.filter(isNum); if(v2.length<3) return "";
+    const W=200,Hh=26;
+    const mn=Math.min(...v2,zero?0:Infinity===Infinity?Math.min(...v2):0), mx0=Math.max(...v2);
+    const lo=zero?Math.min(0,...v2):Math.min(...v2), hi=zero?Math.max(0,...v2):mx0;
+    const rg=(hi-lo)||1;
+    const Y=v=>Hh-((v-lo)/rg)*(Hh-3)-1.5;
+    const pts=vals.map((v,i)=>isNum(v)?`${(i/(vals.length-1||1)*W).toFixed(1)},${Y(v).toFixed(1)}`:null).filter(Boolean).join(" ");
+    const zline=zero?`<line x1="0" y1="${Y(0).toFixed(1)}" x2="${W}" y2="${Y(0).toFixed(1)}" stroke="#D9DEE5" stroke-dasharray="3 3"/>`:"";
+    const last=v2[v2.length-1];
+    return `<div class="sparkrow"><div class="lab">${label}</div>
+      <svg viewBox="0 0 ${W} ${Hh}" preserveAspectRatio="none">${zline}<polyline points="${pts}" fill="none" stroke="${color}" stroke-width="1.6"/></svg>
+      <div class="val">${last.toFixed(dec??0)}</div></div>`;
+  };
   const sp=(key,label,color,dual)=>{
     const arr=H.slice(-40);
     const vals=arr.map(r=>dual?[r[key[0]]??0,r[key[1]]??0]:(mmVal(r,key)??null));
@@ -730,6 +753,23 @@ function renderMM(){
     sp("r10","10일 비율","#33506E")+
     sp("q25u","분기 25%↑","#157A4F")+
     sp("q25d","분기 25%↓","#C0362C");
+
+  /* 보조 브레스 */
+  const H60=H.slice(-60);
+  const cum=f=>{ let c=0,out=[],any=false;
+    for(const r of H60){ const v=f(r); if(isNum(v)){c+=v;any=true;out.push(c);} else out.push(any?c:null); }
+    return out; };
+  const mcoA=H60.map(r=>isNum(r.mco)?r.mco:null);
+  const mcsA=H60.map(r=>isNum(r.mcs)?r.mcs:null);
+  const adA=H60.some(r=>isNum(r.adv)&&isNum(r.dec))?cum(r=>(isNum(r.adv)&&isNum(r.dec))?r.adv-r.dec:null):[];
+  const hlA=cum(r=>(isNum(r.nh)&&isNum(r.nl))?r.nh-r.nl:null);
+  const aux=
+    spLine("맥클렐란 Osc",mcoA,"#6B4E8E",1,true)+
+    spLine("서메이션",mcsA,"#6B4E8E",0)+
+    spLine("A/D 누적",adA,"#33506E",0)+
+    spLine("신고−신저 누적",hlA,"#33506E",0);
+  $("#auxWrap").hidden=!aux;
+  if(aux) $("#auxRows").innerHTML=aux;
 }
 
 const SEC_KO={"Technology":"기술","Telecommunications":"통신","Consumer Discretionary":"경기소비재",
@@ -876,7 +916,7 @@ function renderAll(){
   renderCryptoNote(); renderQuad();
   $("#krBlock").hidden=!CFG.showKR;
   if(CFG.showKR) renderRows($("#rowsKR"),"kr");
-  $("#footer").textContent=`SECTOR + BREADTH · v2.1 · 저장:${Store.mode}`;
+  $("#footer").textContent=`SECTOR + BREADTH · v2.2 · 저장:${Store.mode}`;
 }
 
 /* ════ 시트 ════ */

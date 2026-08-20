@@ -53,6 +53,86 @@ SECTOR_CORR_WIN = 120    # 상관 계산에 쓸 거래일
 UA = {"User-Agent": "Mozilla/5.0 (compatible; sector-dashboard/1.0)"}
 
 
+# ─────────────────────── Stockbee 원본 시트 ───────────────────────
+STOCKBEE_SHEET = ("https://docs.google.com/spreadsheet/pub"
+                  "?key=0Am_cU8NLIU20dEhiQnVHN3Nnc3B1S3J6eGhKZFo0N3c")
+
+def _sb_col(h: str):
+    """시트 헤더 → 내부 필드명 (헤더 문구가 바뀌어도 견디게 느슨하게 매칭)."""
+    n = "".join(ch for ch in h.lower() if ch.isalnum())
+    if "t2108" in n: return "t2108"
+    if "universe" in n: return "universe"
+    if "5day" in n: return "r5"
+    if "10day" in n: return "r10"
+    up, dn = "up" in n, "down" in n
+    if "4" in n and "quarter" not in n and "month" not in n and "34" not in n:
+        if up: return "up4"
+        if dn: return "dn4"
+    if "25" in n and "quarter" in n: return "q25u" if up else ("q25d" if dn else None)
+    if "25" in n and "month" in n:   return "m25u" if up else ("m25d" if dn else None)
+    if "50" in n and "month" in n:   return "m50u" if up else ("m50d" if dn else None)
+    if "13" in n and "34" in n:      return "u13" if up else ("d13" if dn else None)
+    return None
+
+
+def parse_stockbee(df: pd.DataFrame) -> dict:
+    """헤더 매칭 → {날짜: {필드: 값}}. 못 알아본 컬럼은 버린다."""
+    cols = {}
+    for c in df.columns:
+        k = _sb_col(str(c))
+        if k and k not in cols.values():
+            cols[c] = k
+    date_col = None
+    for c in df.columns:
+        if "date" in str(c).lower():
+            date_col = c
+            break
+    if date_col is None or "up4" not in cols.values():
+        return {}
+    out = {}
+    for _, row in df.iterrows():
+        d = pd.to_datetime(str(row[date_col]), errors="coerce")
+        if pd.isna(d):
+            continue
+        rec = {}
+        for c, k in cols.items():
+            v = str(row[c]).replace(",", "").replace("%", "").strip()
+            try:
+                fv = float(v)
+            except ValueError:
+                continue
+            rec[k] = round(fv, 2) if k in ("r5", "r10", "t2108") else int(fv)
+        if rec:
+            out[d.strftime("%Y-%m-%d")] = rec
+    return out
+
+
+def fetch_stockbee() -> dict:
+    """Stockbee Market Monitor 공개 구글시트에서 최근 값을 읽는다. 실패하면 {}."""
+    try:
+        r = requests.get(STOCKBEE_SHEET + "&output=csv", headers=UA, timeout=40)
+        if r.ok and "," in r.text[:2000] and "<html" not in r.text[:200].lower():
+            df = pd.read_csv(io.StringIO(r.text))
+            got = parse_stockbee(df)
+            if got:
+                return got
+    except Exception:
+        pass
+    try:  # csv 게시가 막혀 있으면 HTML 표로
+        r = requests.get(STOCKBEE_SHEET + "&output=html", headers=UA, timeout=40)
+        for df in pd.read_html(io.StringIO(r.text)):
+            if df.shape[0] > 5 and df.shape[1] > 8:
+                if not any("date" in str(c).lower() for c in df.columns):
+                    df.columns = df.iloc[0]
+                    df = df.iloc[1:]
+                got = parse_stockbee(df)
+                if got:
+                    return got
+    except Exception:
+        pass
+    return {}
+
+
 # ─────────────────────── 유니버스 ───────────────────────
 def load_universe(limit: int | None) -> list[str]:
     """나스닥/기타 상장 보통주 목록. ETF·테스트·워런트·우선주는 뺀다."""
@@ -326,6 +406,14 @@ def breadth_block(C: pd.DataFrame, V: pd.DataFrame, days: int, sector_map=None):
     nh = (C >= hi252).sum(axis=1)
     nl = (C <= lo252).sum(axis=1)
 
+    # 등락 종목 수 → 맥클렐란 오실레이터/서메이션 (비율 보정식)
+    adv = (r1 > 0).sum(axis=1)
+    dec = (r1 < 0).sum(axis=1)
+    rana = (adv - dec) / (adv + dec).replace(0, np.nan) * 1000
+    mco = (rana.ewm(span=19, adjust=False).mean()
+           - rana.ewm(span=39, adjust=False).mean()).round(1)
+    mcs = mco.fillna(0).cumsum().round(0)
+
     r5 = (up4.rolling(5).sum() / dn4.rolling(5).sum().replace(0, np.nan)).round(2)
     r10 = (up4.rolling(10).sum() / dn4.rolling(10).sum().replace(0, np.nan)).round(2)
     uni = C.notna().sum(axis=1)
@@ -370,6 +458,7 @@ def breadth_block(C: pd.DataFrame, V: pd.DataFrame, days: int, sector_map=None):
             "u13": val(u13, d), "d13": val(d13, d),
             "t2108": val(t2108, d), "a50": val(a50, d), "a200": val(a200, d),
             "nh": val(nh, d), "nl": val(nl, d), "universe": val(uni, d),
+            "adv": val(adv, d), "dec": val(dec, d), "mco": val(mco, d), "mcs": val(mcs, d),
         })
     return rows, sectors
 
@@ -413,6 +502,7 @@ def main():
     ap.add_argument("--limit", type=int, default=None, help="유니버스 상한 (테스트용)")
     ap.add_argument("--quotes-only", action="store_true")
     ap.add_argument("--no-sector", action="store_true")
+    ap.add_argument("--no-stockbee", action="store_true", help="원본 시트를 쓰지 않고 자체 계산만")
     ap.add_argument("--out", default="data.json")
     args = ap.parse_args()
 
@@ -455,6 +545,21 @@ def main():
     merged = {r["d"]: r for r in old}
     for r in breadth:
         merged[r["d"]] = r
+
+    # Stockbee 원본 시트가 있으면 겹치는 필드를 원본 값으로 덮는다.
+    # NH/NL·%MA·맥클렐란·섹터별 카운트는 시트에 없으므로 자체 계산이 그대로 남는다.
+    if not args.no_stockbee:
+        print("6) Stockbee 원본 시트")
+        sb = fetch_stockbee()
+        if sb:
+            for d, vals in sb.items():
+                base = merged.get(d, {"d": d})
+                base.update(vals)
+                merged[d] = base
+            bsrc = "Stockbee 원본 시트 · NH/NL·%MA·맥클렐란·섹터는 자체 계산"
+            print(f"  {len(sb)}일 병합 (최신 {max(sb)})")
+        else:
+            print("  ! 시트 접근 실패 — 자체 계산 유지")
     history = [merged[k] for k in sorted(merged)][-HISTORY_KEEP:]
 
     asof = dates[-1] if dates else prev.get("asof")
