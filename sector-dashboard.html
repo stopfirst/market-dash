@@ -84,8 +84,16 @@ table.mm th{
   padding:6px 5px;border-bottom:1px solid var(--line);text-align:right;
   position:sticky;top:0;background:var(--card);
 }
-table.mm th.grp{text-align:center;color:var(--steel);border-bottom:1px solid var(--line-soft);
-  font-size:8.5px;letter-spacing:.12em;text-transform:uppercase;padding:5px 4px}
+table.mm th.grp{text-align:center;border-bottom:1px solid var(--line-soft);
+  font-size:8.5px;letter-spacing:.12em;text-transform:uppercase;padding:5px 4px;font-weight:700}
+table.mm th.grp.g1{color:#33506E;background:#EDF2F8}
+table.mm th.grp.g2{color:#6B4E8E;background:#F3EFF8}
+table.mm th.grp.g3{color:#9A6A0B;background:#FBF4E6}
+table.mm th.g1{color:#33506E}table.mm th.g2{color:#6B4E8E}table.mm th.g3{color:#9A6A0B}
+table.mm td.g1{background-color:rgba(51,80,110,.030)}
+table.mm td.g2{background-color:rgba(107,78,142,.030)}
+table.mm td.g3{background-color:rgba(154,106,11,.035)}
+table.mm .gb{border-left:2px solid var(--line)}
 table.mm td{padding:5px 5px;border-bottom:1px solid var(--line-soft);text-align:right}
 table.mm td.d,table.mm th.d{text-align:left;position:sticky;left:0;background:var(--card);
   box-shadow:1px 0 0 var(--line-soft);color:var(--ink-2);padding-left:9px}
@@ -134,7 +142,7 @@ table.mm tr.today td.d{background:#FAFBFC}
 .row{display:flex;align-items:center;gap:9px;padding:8px 11px;border-bottom:1px solid var(--line-soft);position:relative;cursor:pointer}
 .row:last-child{border-bottom:0}
 .row-bar{position:absolute;left:0;top:0;bottom:0;opacity:.14}
-.row-i{font-family:var(--mono);font-size:10px;color:var(--ink-3);width:16px;position:relative}
+.row-i{font-family:var(--mono);font-size:10px;color:var(--ink-3);width:34px;position:relative;white-space:nowrap}
 .row-n{flex:1;min-width:0;position:relative}
 .row-t{font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .row-s{font-family:var(--mono);font-size:9.5px;color:var(--ink-3)}
@@ -180,6 +188,14 @@ label.fl{display:block;font-family:var(--mono);font-size:10px;letter-spacing:.09
 .logrow time{font-family:var(--mono);font-size:11px;color:var(--ink-3);flex:none;width:56px}
 .footer{margin-top:32px;padding:13px 0 0;border-top:1px solid var(--line-soft);
   font-family:var(--mono);font-size:10px;color:var(--ink-3);text-align:center}
+.sbhead,.sbrow{display:grid;grid-template-columns:minmax(64px,1fr) 2fr 42px 42px 46px;gap:8px;align-items:center;padding:6px 11px;border-bottom:1px solid var(--line-soft);font-size:12px}
+.sbrow:last-child{border-bottom:0}
+.sbhead{font-family:var(--mono);font-size:9px;color:var(--ink-3);letter-spacing:.07em;border-bottom:1px solid var(--line)}
+.sb-n{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sb-bar{height:6px;background:var(--line-soft);border-radius:3px;overflow:hidden}
+.sb-bar i{display:block;height:100%;background:var(--up);border-radius:3px}
+.sb-v,.sb-x{font-family:var(--mono);font-size:11.5px;text-align:right;font-variant-numeric:tabular-nums}
+.qcap{font-family:var(--mono);font-size:9.5px;color:var(--ink-3);margin-top:7px;line-height:1.5}
 @media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
 </style>
 </head>
@@ -227,6 +243,11 @@ label.fl{display:block;font-family:var(--mono);font-size:10px;letter-spacing:.09
     <div class="mmhead"><b>추세</b><span class="src">최근 40거래일</span></div>
     <div id="sparks"></div>
   </div>
+  <div class="mmwrap" style="margin-top:9px" id="sbWrap" hidden>
+    <div class="mmhead"><b>섹터별 4% 돌파 · 오늘</b><span class="src" id="sbSrc"></span></div>
+    <div id="secBreadth"></div>
+    <div class="mmfoot">지수는 밋밋한데 특정 섹터에 4% 돌파가 몰리면, 그 안에서 개별 종목 장세가 시작된 것. M25↑는 그 섹터에서 한 달 25% 이상 오른 종목 수.</div>
+  </div>
 
   <div class="sec"><h2>섹터</h2><span class="hint" id="benchK"></span></div>
   <div class="rule"></div>
@@ -240,15 +261,10 @@ label.fl{display:block;font-family:var(--mono);font-size:10px;letter-spacing:.09
   <div class="rows" id="rowsTheme"></div>
   <div class="xs dim" id="cryptoNote" style="margin-top:6px"></div>
 
-  <div class="eyebrow" style="margin:19px 0 0">로테이션 사분면 · 3M × 1W</div>
+  <div class="eyebrow" style="margin:19px 0 0">로테이션 사분면</div>
   <div class="quad">
     <div id="quadSvg"></div>
-    <div class="qlegend">
-      <div class="ql">↗ 선도 · 강함+가속</div>
-      <div class="ql">↘ 약화 · 강함+감속</div>
-      <div class="ql">↙ 지체 · 약함+감속</div>
-      <div class="ql">↖ 개선 · 약함+가속</div>
-    </div>
+    <div class="qcap">가로 3M · 세로 1W — SPY 대비 초과수익률(비율식, %) · 회색 꼬리는 최근 5일 경로 · 점을 누르면 상세</div>
   </div>
 
   <div id="krBlock" hidden>
@@ -256,7 +272,7 @@ label.fl{display:block;font-family:var(--mono);font-size:10px;letter-spacing:.09
     <div class="rows" id="rowsKR"></div>
   </div>
 
-  <div class="footer" id="footer">SECTOR + BREADTH · v2.0</div>
+  <div class="footer" id="footer">SECTOR + BREADTH · v2.1</div>
 </div>
 
 <div class="sheet" id="sheet">
@@ -335,7 +351,7 @@ const PERIODS=[{k:"d1",t:"1D"},{k:"w1",t:"1W"},{k:"m1",t:"1M"},{k:"m3",t:"3M"},{
 
 /* Market Monitor 컬럼 정의 (Stockbee) */
 const MM_COLS=[
-  {g:"PRIMARY", c:[
+  {g:"PRIMARY", gk:"g1", c:[
     {k:"up4",  t:"4%↑",   h:"당일 4% 이상 상승 종목 수"},
     {k:"dn4",  t:"4%↓",   h:"당일 4% 이상 하락 종목 수"},
     {k:"r5",   t:"5D비",  h:"5일 4%↑합 / 5일 4%↓합", d:2},
@@ -343,7 +359,7 @@ const MM_COLS=[
     {k:"q25u", t:"Q25↑",  h:"분기(65일) 25% 이상 상승"},
     {k:"q25d", t:"Q25↓",  h:"분기(65일) 25% 이상 하락"}
   ]},
-  {g:"SECONDARY", c:[
+  {g:"SECONDARY", gk:"g2", c:[
     {k:"m25u", t:"M25↑",  h:"월(20일) 25% 이상 상승"},
     {k:"m25d", t:"M25↓",  h:"월 25% 이상 하락"},
     {k:"m50u", t:"M50↑",  h:"월 50% 이상 상승"},
@@ -351,7 +367,7 @@ const MM_COLS=[
     {k:"u13",  t:"13/34↑",h:"34일간 13% 이상 상승"},
     {k:"d13",  t:"13/34↓",h:"34일간 13% 이상 하락"}
   ]},
-  {g:"TREND", c:[
+  {g:"TREND", gk:"g3", c:[
     {k:"t2108",t:"T2108", h:"40일선 위 종목 비율(%)", d:1},
     {k:"a50",  t:"%>50",  h:"50일선 위 비율(%)", d:1},
     {k:"a200", t:"%>200", h:"200일선 위 비율(%)", d:1},
@@ -395,13 +411,12 @@ function ytdPct(rows){ if(!rows||!rows.length)return null;
   for(let i=0;i<rows.length;i++){ if(new Date(rows[i].d).getFullYear()===y){ base=i>0?rows[i-1].c:rows[i].c; break; } }
   return (isNum(base)&&base)?(rows[rows.length-1].c/base-1)*100:null; }
 function sma(c,n){ if(!c||c.length<n)return null; let s=0; for(let i=c.length-n;i<c.length;i++)s+=c[i]; return s/n; }
-function rsPct(c,b,n){ if(!c||!b)return null; const L=Math.min(c.length,b.length); if(L<n+1)return null;
-  const a=c.slice(L-n-1),z=b.slice(L-n-1); const r0=a[0]/z[0],r1=a[a.length-1]/z[z.length-1];
-  return (isNum(r0)&&isNum(r1)&&r0)?(r1/r0-1)*100:null; }
+function pctAt(c,n,off){ const L=c.length-1-(off||0); if(L<n||L<0)return null;
+  const a=c[L],b=c[L-n]; return (isNum(a)&&isNum(b)&&b)?(a/b-1)*100:null; }
 
 /* ── 상태 ── */
 let CFG=Object.assign({},DEFAULT_CFG);
-let DATA={ts:null,asof:null,src:{},series:{},q:{},breadth:[],universe:null,errs:[]};
+let DATA={ts:null,asof:null,src:{},series:{},q:{},breadth:[],sectors:[],universe:null,errs:[]};
 let SNAP={};
 
 /* ════ 데이터 소스 ════ */
@@ -423,7 +438,17 @@ async function fetchFeed(url){
   if(j.quotes) DATA.q=Object.assign({},DATA.q,j.quotes);
   if(j.breadth?.history?.length) DATA.breadth=j.breadth.history;
   else if(Array.isArray(j.breadth)) DATA.breadth=j.breadth;
-  DATA.asof=j.asof||null;
+  if(Array.isArray(j.sectors)&&j.sectors.length) DATA.sectors=j.sectors;
+  if(Array.isArray(j.dates)&&j.series){          // 공통 날짜축 + 종가 → 꼬리·순위변화 재료
+    Object.keys(j.series).forEach(t=>{
+      const arr=j.series[t]; if(!Array.isArray(arr)) return;
+      const rows=[];
+      for(let i=0;i<j.dates.length&&i<arr.length;i++){ const c=arr[i]; if(isNum(c)) rows.push({d:j.dates[i],c}); }
+      if(rows.length>=10) DATA.series[t]=rows;
+    });
+    computeSeries();
+  }
+  DATA.asof=j.asof||DATA.asof;
   DATA.universe=j.universe||j.breadth?.universe||null;
   DATA.src.feed="자동 수집";
   DATA.src.equity="자동 수집"+(j.asof?" ("+j.asof+")":"");
@@ -453,19 +478,32 @@ async function pool(items,fn,size){
   return out;
 }
 function computeSeries(){
-  const S=DATA.series, b=(S[CFG.bench]||[]).map(r=>r.c);
+  const S=DATA.series, bRows=S[CFG.bench]||[], b=bRows.map(r=>r.c);
+  const bYtd=ytdPct(bRows);
+  const rel=(x,y)=>{ if(x===null||y===null) return null;
+    const d=1+y/100; return d? +(((1+x/100)/d-1)*100).toFixed(2) : null; };  // 비율식 — 파이썬과 동일
+  const sp=(c,n,off)=>rel(pctAt(c,n,off),pctAt(b,n,off));
   allTickers().forEach(t=>{
     const rows=S[t]; if(!rows||rows.length<10) return;
     const c=rows.map(r=>r.c);
+    const tYtd=ytdPct(rows);
+    const tail=[];
+    for(let off=5;off>=0;off--){
+      const x=sp(c,63,off)??sp(c,21,off), y=sp(c,5,off);
+      if(x!==null&&y!==null) tail.push([x,y]);
+    }
     DATA.q[t]=Object.assign(DATA.q[t]||{},{
       px:c[c.length-1], d1:pctBack(c,1), w1:pctBack(c,5), m1:pctBack(c,21),
-      m3:pctBack(c,63), m6:pctBack(c,126), ytd:ytdPct(rows),
-      rs_w1:rsPct(c,b,5), rs_m1:rsPct(c,b,21), rs_m3:rsPct(c,b,63),
+      m3:pctBack(c,63), m6:pctBack(c,126), ytd:tYtd,
+      rs_d1:sp(c,1,0), rs_w1:sp(c,5,0), rs_m1:sp(c,21,0),
+      rs_m3:sp(c,63,0), rs_m6:sp(c,126,0),
+      rs_ytd:rel(tYtd,bYtd),
+      tail: tail.length>=2?tail:undefined,
       a50:(()=>{const m=sma(c,50);return isNum(m)?c[c.length-1]>m:null;})(),
       a200:(()=>{const m=sma(c,200);return isNum(m)?c[c.length-1]>m:null;})()
     });
   });
-  DATA.asof=(S[CFG.bench]||[]).slice(-1)[0]?.d||DATA.asof;
+  DATA.asof=bRows.slice(-1)[0]?.d||DATA.asof;
 }
 
 /* ③ 붙여넣기 */
@@ -486,9 +524,10 @@ function ingest(obj){
   });
   const b=DATA.q[CFG.bench]||{};
   Object.keys(DATA.q).forEach(t=>{ const o=DATA.q[t];
-    if(isNum(o.w1)&&isNum(b.w1)) o.rs_w1=o.w1-b.w1;
-    if(isNum(o.m1)&&isNum(b.m1)) o.rs_m1=o.m1-b.m1;
-    if(isNum(o.m3)&&isNum(b.m3)) o.rs_m3=o.m3-b.m3;
+    ["d1","w1","m1","m3","m6","ytd"].forEach(k=>{
+      if(isNum(o[k])&&isNum(b[k])){ const dn=1+b[k]/100;
+        if(dn) o["rs_"+k]=+(((1+o[k]/100)/dn-1)*100).toFixed(2); }
+    });
   });
   if(obj.breadth){ const h=obj.breadth.history||obj.breadth; if(Array.isArray(h)&&h.length) DATA.breadth=h; }
   DATA.asof=obj.asof||DATA.asof;
@@ -507,7 +546,7 @@ async function refreshAll(){
     const list=allTickers();
     const got=await pool(list,async t=>{ DATA.series[t]=await stooq(t); return t; },4);
     const n=got.filter(Boolean).length;
-    if(n>=3){ computeSeries(); DATA.src.equity="Stooq 직접"; ok=true;
+    if(n>=3){ computeSeries(); DATA.src.equity="Stooq 직접 · 지연 가능(참고용)"; ok=true;
       if(n<list.length) errs.push(`일부 티커 실패 ${list.length-n}개`); }
     else errs.push("직접 수집 실패 — 브라우저가 외부 요청을 막고 있습니다");
   }
@@ -525,14 +564,23 @@ async function saveSnap(){
   const ks=Object.keys(SNAP).sort(); while(ks.length>40) delete SNAP[ks.shift()];
   await Store.set(K.SNAP,SNAP);
 }
-function prevRank(t){ const ks=Object.keys(SNAP).sort();
+function prevRankSnap(t){
+  const ks=Object.keys(SNAP).sort();
   for(let i=ks.length-1;i>=0;i--){ if(ks[i]===todayKey())continue; const r=SNAP[ks[i]].rank?.[t]; if(isNum(r))return r; }
   return null; }
+/* 전일 종가 기준 1M 절대수익률 순위 (그룹 내). 시계열이 있으면 이쪽이 정확하다. */
+function prevFixedRank(which){
+  const list=ALL()[which]||[]; const vals=[];
+  list.forEach(t=>{ const rows=DATA.series[t]; if(!rows||rows.length<23) return;
+    const v=pctAt(rows.map(r=>r.c),21,1); if(v!==null) vals.push([t,v]); });
+  if(vals.length<Math.max(3,Math.ceil(list.length*0.6))) return null;
+  vals.sort((a,b)=>b[1]-a[1]);
+  const m=new Map(); vals.forEach(([t],i)=>m.set(t,i+1)); return m;
+}
 
 /* 값 선택 / 랭킹 */
 function valOf(o){ if(!o)return null;
-  if(CFG.mode==="rs"){ const m={d1:"rs_w1",w1:"rs_w1",m1:"rs_m1",m3:"rs_m3",m6:"rs_m3",ytd:"rs_m3"};
-    return o[m[CFG.period]]??null; }
+  if(CFG.mode==="rs") return o["rs_"+CFG.period]??null;
   return o[CFG.period]??null; }
 function rankList(which,fixed){
   const list=ALL()[which]||[];
@@ -601,14 +649,15 @@ function renderMM(){
     return;
   }
   const rows=H.slice(-CFG.mmRows).reverse();
+  const meta=MM_COLS.flatMap(g=>g.c.map((c,i)=>({...c, gk:g.gk, first:i===0})));
   const head1=`<tr><th class="d" rowspan="2">날짜</th>`+
-    MM_COLS.map(g=>`<th class="grp" colspan="${g.c.length}">${g.g}</th>`).join("")+`</tr>`;
-  const head2=`<tr>`+cols.map(c=>`<th title="${c.h}">${c.t}</th>`).join("")+`</tr>`;
+    MM_COLS.map(g=>`<th class="grp ${g.gk}" colspan="${g.c.length}">${g.g}</th>`).join("")+`</tr>`;
+  const head2=`<tr>`+meta.map(c=>`<th class="${c.gk}${c.first?" gb":""}" title="${c.h}">${c.t}</th>`).join("")+`</tr>`;
   const body=rows.map((r,i)=>{
-    const tds=cols.map(c=>{
+    const tds=meta.map(c=>{
       const v=mmVal(r,c.k,c.d);
       const txt=v===null?"—":(c.d?v.toFixed(c.d):fmtI(v));
-      return `<td style="${mmBg(c.k,v)}">${txt}</td>`;
+      return `<td class="${c.gk}${c.first?" gb":""}" style="${mmBg(c.k,v)}">${txt}</td>`;
     }).join("");
     return `<tr class="${i===0?"today":""}"><td class="d">${(r.d||"").slice(5)}</td>${tds}</tr>`;
   }).join("");
@@ -632,7 +681,8 @@ function renderMM(){
     `읽는 법 — 브레스는 <b>극단에서만</b> 씁니다. 극단적으로 나쁜 브레스는 바닥·반등 신호로 잘 작동하지만, `+
     `극단적으로 좋은 브레스는 천장 신호로는 잘 듣지 않습니다(눌림 정도). 우선순위는 T2108의 방향, 일간 4% 추세, `+
     `13%/34일 추세, 월간 25%·50% 상승 종목 수 순입니다. `+
-    `<span class="dim">기준: Stockbee Market Monitor.</span>`;
+    `<span class="dim">계산식은 Stockbee가 공개한 TC2000 v12.4 스캔과 동일. Q25·13/34는 65·34일 최저/최고 종가 대비이며 `+
+    `기간 시작점 대비가 아닙니다. 원본과의 잔여 차이는 유니버스(Telechart 목록)와 데이터 벤더 차이로, 수 % 수준이 정상입니다.</span>`;
 
   /* 게이지 */
   const g=(k,label,v,lo,hi,note)=>{
@@ -682,6 +732,30 @@ function renderMM(){
     sp("q25d","분기 25%↓","#C0362C");
 }
 
+const SEC_KO={"Technology":"기술","Telecommunications":"통신","Consumer Discretionary":"경기소비재",
+  "Consumer Staples":"필수소비재","Energy":"에너지","Finance":"금융","Health Care":"헬스케어",
+  "Industrials":"산업재","Basic Materials":"소재","Real Estate":"부동산","Utilities":"유틸리티","Miscellaneous":"기타"};
+function renderSecBreadth(){
+  const arr=DATA.sectors||[];
+  const wrap=$("#sbWrap");
+  if(!arr.length){ wrap.hidden=true; return; }
+  wrap.hidden=false;
+  const mx=Math.max(...arr.map(o=>o.up4||0),1);
+  $("#sbSrc").textContent=DATA.asof?("기준 "+DATA.asof):"";
+  $("#secBreadth").innerHTML=
+    `<div class="sbhead"><div class="sb-n">섹터</div><div class="sb-bar"></div>
+      <div class="sb-v">4%↑</div><div class="sb-v">4%↓</div><div class="sb-x">M25↑</div></div>`+
+    arr.map(o=>{
+      const w=clamp((o.up4||0)/mx*100,0,100);
+      const nm=(US_SECTORS.find(x=>x.s===o.s)?.k)||SEC_KO[o.s]||o.s;
+      return `<div class="sbrow"><div class="sb-n">${nm}</div>
+        <div class="sb-bar"><i style="width:${w}%"></i></div>
+        <div class="sb-v ${o.up4?"up":"dim"}">${o.up4??"—"}</div>
+        <div class="sb-v ${o.dn4?"dn":"dim"}">${o.dn4??"—"}</div>
+        <div class="sb-x">${o.m25u??"—"}</div></div>`;
+    }).join("");
+}
+
 /* ── 섹터 ── */
 function renderSegs(){
   $("#segPeriod").innerHTML=PERIODS.map(p=>`<button data-p="${p.k}" aria-pressed="${CFG.period===p.k}">${p.t}</button>`).join("");
@@ -690,8 +764,11 @@ function renderSegs(){
 }
 function renderHeat(el,which){
   const arr=rankList(which);
+  const fixedNow=new Map(rankList(which,true).map(x=>[x.s,x.rank]));
+  const pm=prevFixedRank(which);
   el.innerHTML=arr.map(r=>{
-    const p=prevRank(r.s), d=isNum(p)?p-r.rank:null;
+    const p=pm?pm.get(r.s):prevRankSnap(r.s), f=fixedNow.get(r.s);
+    const d=(isNum(p)&&isNum(f))?p-f:null;
     const ar=d===null?"":d>0?`▲${d}`:d<0?`▼${-d}`:"=";
     return `<div class="tile" data-t="${r.s}"><div class="tile-bg" style="background:${heat(r.v)}"></div>
       <div class="tile-r">${r.rank}${ar?" "+ar:""}</div>
@@ -701,13 +778,18 @@ function renderHeat(el,which){
 }
 function renderRows(el,which){
   const arr=rankList(which);
+  const fixedNow=new Map(rankList(which,true).map(x=>[x.s,x.rank]));
+  const pm=prevFixedRank(which);
   const mx=Math.max(...arr.map(r=>isNum(r.v)?Math.abs(r.v):0),1);
   el.innerHTML=arr.map(r=>{
     const w=isNum(r.v)?clamp(Math.abs(r.v)/mx*100,0,100):0;
     const tr=r.o.a50===true?"50↑":r.o.a50===false?"50↓":"";
+    const p=pm?pm.get(r.s):prevRankSnap(r.s), f=fixedNow.get(r.s);
+    const d=(isNum(p)&&isNum(f))?p-f:null;
+    const ar=d===null?"":d>0?` ▲${d}`:d<0?` ▼${-d}`:"";
     return `<div class="row" data-t="${r.s}">
       <div class="row-bar" style="width:${w}%;background:${r.v>=0?"var(--up)":"var(--dn)"}"></div>
-      <div class="row-i">${r.rank}</div>
+      <div class="row-i">${r.rank}${ar}</div>
       <div class="row-n"><div class="row-t">${r.k}</div><div class="row-s">${r.s}${r.g?" · "+r.g:""}</div></div>
       <div class="row-x">${tr}</div>
       <div class="row-v ${cls(r.v)}">${fmtP(r.v)}</div></div>`;
@@ -723,37 +805,73 @@ function renderQuad(){
   const src=[...ALL().us,...ALL().th];
   const pts=src.map(t=>{const o=DATA.q[t]; if(!o)return null;
     const x=isNum(o.rs_m3)?o.rs_m3:o.rs_m1, y=o.rs_w1;
-    return (isNum(x)&&isNum(y))?{t,x,y}:null;}).filter(Boolean);
-  const W=340,Hh=280,P=24;
+    if(!(isNum(x)&&isNum(y))) return null;
+    const tail=Array.isArray(o.tail)?o.tail.filter(p=>isNum(p?.[0])&&isNum(p?.[1])):[];
+    return {t,x,y,tail};
+  }).filter(Boolean);
+  const W=380,Hh=340,P=30;
   if(!pts.length){ $("#quadSvg").innerHTML=`<div class="xs dim" style="padding:24px 0;text-align:center">상대강도 데이터가 필요합니다</div>`; return; }
-  const mx=Math.max(...pts.map(p=>Math.abs(p.x)),1)*1.15, my=Math.max(...pts.map(p=>Math.abs(p.y)),1)*1.15;
-  const sx=v=>P+(v/mx/2+.5)*(W-2*P), sy=v=>(Hh-P)-(v/my/2+.5)*(Hh-2*P);
-  const dots=pts.map(p=>{
-    const q=p.x>=0?(p.y>=0?"#157A4F":"#B4740E"):(p.y>=0?"#33506E":"#C0362C");
-    return `<circle cx="${sx(p.x).toFixed(1)}" cy="${sy(p.y).toFixed(1)}" r="3.8" fill="${q}" fill-opacity=".85"/>
-      <text x="${(sx(p.x)+6).toFixed(1)}" y="${(sy(p.y)+3.4).toFixed(1)}" font-size="8.5" fill="#6B7280" font-family="ui-monospace,monospace">${p.t}</text>`;
+  const xs=pts.flatMap(p=>[p.x,...p.tail.map(q=>q[0])]);
+  const ys=pts.flatMap(p=>[p.y,...p.tail.map(q=>q[1])]);
+  const mx=Math.max(...xs.map(Math.abs),1)*1.18, my=Math.max(...ys.map(Math.abs),1)*1.18;
+  const sx=v=>P+(clamp(v,-mx,mx)/mx/2+.5)*(W-2*P);
+  const sy=v=>(Hh-P)-(clamp(v,-my,my)/my/2+.5)*(Hh-2*P);
+  const qcol=(x,y)=> x>=0?(y>=0?"#157A4F":"#B4740E"):(y>=0?"#33506E":"#C0362C");
+
+  const tails=pts.map(p=>{
+    if(p.tail.length<2) return "";
+    const path=p.tail.map(q=>`${sx(q[0]).toFixed(1)},${sy(q[1]).toFixed(1)}`).join(" ");
+    const dots=p.tail.slice(0,-1).map((q,i)=>
+      `<circle cx="${sx(q[0]).toFixed(1)}" cy="${sy(q[1]).toFixed(1)}" r="1.6" fill="#AEB8C4" fill-opacity="${(.25+.12*i).toFixed(2)}"/>`).join("");
+    return `<polyline points="${path}" fill="none" stroke="#B9C2CE" stroke-width="1.3" stroke-opacity=".65" stroke-linejoin="round"/>`+dots;
   }).join("");
+
+  // 라벨 충돌 회피
+  const labs=pts.map(p=>({p,lx:sx(p.x)+6.5,ly:sy(p.y)+3.4}));
+  labs.sort((a,b)=>a.ly-b.ly||a.lx-b.lx);
+  for(let i=1;i<labs.length;i++)
+    for(let j=Math.max(0,i-6);j<i;j++)
+      if(Math.abs(labs[i].lx-labs[j].lx)<44 && Math.abs(labs[i].ly-labs[j].ly)<9.5)
+        labs[i].ly=labs[j].ly+9.5;
+
+  const heads=labs.map(({p,lx,ly})=>{
+    const col=qcol(p.x,p.y);
+    return `<g data-qt="${p.t}" style="cursor:pointer">
+      <circle cx="${sx(p.x).toFixed(1)}" cy="${sy(p.y).toFixed(1)}" r="4.4" fill="${col}"/>
+      <circle cx="${sx(p.x).toFixed(1)}" cy="${sy(p.y).toFixed(1)}" r="9" fill="transparent"/>
+      <text x="${lx.toFixed(1)}" y="${ly.toFixed(1)}" font-size="9" font-weight="600" fill="#3C4654"
+        font-family="ui-monospace,monospace" style="paint-order:stroke" stroke="#FCFCFD" stroke-width="3">${p.t}</text>
+    </g>`;
+  }).join("");
+
+  const chip=(x,y,anchor,txt,col)=>
+    `<text x="${x}" y="${y}" font-size="9.5" font-weight="700" fill="${col}" text-anchor="${anchor}"
+      font-family="ui-monospace,monospace" style="paint-order:stroke" stroke="#FCFCFD" stroke-width="3.5">${txt}</text>`;
+
   $("#quadSvg").innerHTML=`<svg viewBox="0 0 ${W} ${Hh}" role="img" aria-label="섹터 로테이션 사분면">
-    <rect x="${W/2}" y="${P}" width="${W/2-P}" height="${(Hh-2*P)/2}" fill="rgba(21,122,79,.05)"/>
-    <rect x="${W/2}" y="${Hh/2}" width="${W/2-P}" height="${(Hh-2*P)/2}" fill="rgba(180,116,14,.05)"/>
-    <rect x="${P}" y="${Hh/2}" width="${W/2-P}" height="${(Hh-2*P)/2}" fill="rgba(192,54,44,.05)"/>
-    <rect x="${P}" y="${P}" width="${W/2-P}" height="${(Hh-2*P)/2}" fill="rgba(51,80,110,.05)"/>
-    <line x1="${P}" y1="${Hh/2}" x2="${W-P}" y2="${Hh/2}" stroke="#D9DEE5"/>
-    <line x1="${W/2}" y1="${P}" x2="${W/2}" y2="${Hh-P}" stroke="#D9DEE5"/>
-    <text x="${W-P}" y="${P-7}" font-size="8" fill="#8A93A0" text-anchor="end" font-family="ui-monospace,monospace">선도</text>
-    <text x="${P}" y="${P-7}" font-size="8" fill="#8A93A0" font-family="ui-monospace,monospace">개선</text>
-    <text x="${W-P}" y="${Hh-7}" font-size="8" fill="#8A93A0" text-anchor="end" font-family="ui-monospace,monospace">약화</text>
-    <text x="${P}" y="${Hh-7}" font-size="8" fill="#8A93A0" font-family="ui-monospace,monospace">지체</text>
-    ${dots}</svg>`;
+    <rect x="${W/2}" y="${P}" width="${W/2-P}" height="${(Hh-2*P)/2}" fill="rgba(21,122,79,.07)"/>
+    <rect x="${W/2}" y="${Hh/2}" width="${W/2-P}" height="${(Hh-2*P)/2}" fill="rgba(180,116,14,.06)"/>
+    <rect x="${P}" y="${Hh/2}" width="${W/2-P}" height="${(Hh-2*P)/2}" fill="rgba(192,54,44,.06)"/>
+    <rect x="${P}" y="${P}" width="${W/2-P}" height="${(Hh-2*P)/2}" fill="rgba(51,80,110,.07)"/>
+    <line x1="${P}" y1="${Hh/2}" x2="${W-P}" y2="${Hh/2}" stroke="#C9D0D9" stroke-width="1.2"/>
+    <line x1="${W/2}" y1="${P}" x2="${W/2}" y2="${Hh-P}" stroke="#C9D0D9" stroke-width="1.2"/>
+    ${chip(W-P-3,P+11,"end","선도 (강함·가속)","#157A4F")}
+    ${chip(P+3,P+11,"start","개선 (약함·가속)","#33506E")}
+    ${chip(W-P-3,Hh-P-5,"end","약화 (강함·감속)","#B4740E")}
+    ${chip(P+3,Hh-P-5,"start","지체 (약함·감속)","#C0362C")}
+    <text x="${W/2}" y="${Hh-7}" font-size="8" fill="#8A93A0" text-anchor="middle" font-family="ui-monospace,monospace">← 3M 상대강도 →</text>
+    <text x="10" y="${Hh/2}" font-size="8" fill="#8A93A0" text-anchor="middle" font-family="ui-monospace,monospace" transform="rotate(-90 10 ${Hh/2})">← 1W →</text>
+    ${tails}${heads}
+  </svg>`;
 }
 function renderAll(){
-  renderTop(); renderStrip(); renderMM(); renderSegs();
+  renderTop(); renderStrip(); renderMM(); renderSecBreadth(); renderSegs();
   renderHeat($("#heatUS"),"us");
   renderRows($("#rowsTheme"),"th");
   renderCryptoNote(); renderQuad();
   $("#krBlock").hidden=!CFG.showKR;
   if(CFG.showKR) renderRows($("#rowsKR"),"kr");
-  $("#footer").textContent=`SECTOR + BREADTH · v2.0 · 저장:${Store.mode}`;
+  $("#footer").textContent=`SECTOR + BREADTH · v2.1 · 저장:${Store.mode}`;
 }
 
 /* ════ 시트 ════ */
@@ -881,7 +999,8 @@ function sheetTicker(t){
       ${L("3M",fmtP(o.m3),cls(o.m3))}${L("6M",fmtP(o.m6),cls(o.m6))}${L("YTD",fmtP(o.ytd),cls(o.ytd))}
     </div>
     <div class="card" style="margin-top:9px">
-      ${L("RS 1W",fmtP(o.rs_w1),cls(o.rs_w1))}${L("RS 1M",fmtP(o.rs_m1),cls(o.rs_m1))}${L("RS 3M",fmtP(o.rs_m3),cls(o.rs_m3))}
+      ${L("RS 1D",fmtP(o.rs_d1),cls(o.rs_d1))}${L("RS 1W",fmtP(o.rs_w1),cls(o.rs_w1))}${L("RS 1M",fmtP(o.rs_m1),cls(o.rs_m1))}
+      ${L("RS 3M",fmtP(o.rs_m3),cls(o.rs_m3))}${L("RS 6M",fmtP(o.rs_m6),cls(o.rs_m6))}${L("RS YTD",fmtP(o.rs_ytd),cls(o.rs_ytd))}
       ${L("50MA",o.a50===true?"위":o.a50===false?"아래":"—",o.a50?"up":o.a50===false?"dn":"")}
       ${L("200MA",o.a200===true?"위":o.a200===false?"아래":"—",o.a200?"up":o.a200===false?"dn":"")}
       ${L("종가",isNum(o.px)?fmtN(o.px):"—")}
@@ -905,8 +1024,11 @@ function bind(){
     const m=e.target.closest("button")?.dataset.m; if(!m)return;
     CFG.mode=m; await Store.set(K.CFG,CFG); renderAll(); });
   document.addEventListener("click",e=>{
+    if(e.target.closest("#sheet")) return;
+    const q=e.target.closest("g[data-qt]");
+    if(q){ sheetTicker(q.dataset.qt); return; }
     const el=e.target.closest(".tile[data-t]")||e.target.closest(".row[data-t]");
-    if(el && !e.target.closest("#sheet")) sheetTicker(el.dataset.t); });
+    if(el) sheetTicker(el.dataset.t); });
   $("#obFeed").onclick=sheetFeed; $("#obTry").onclick=refreshAll; $("#obPaste").onclick=sheetPaste;
 }
 

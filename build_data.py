@@ -5,8 +5,15 @@ build_data.py — 섹터 + 마켓브레스 데이터를 하루 한 번 계산해
   python build_data.py                 # 전체 실행
   python build_data.py --limit 800     # 유니버스를 800개로 줄여 빠르게 테스트
   python build_data.py --quotes-only   # ETF 시세만 (브레스 건너뜀)
+  python build_data.py --no-sector     # 섹터별 브레스 생략
 
 출력: data.json  (대시보드가 이 파일 하나만 읽는다)
+
+v2 변경점
+  · ETF 종가 시계열을 그대로 내보낸다 → 대시보드가 순위 변화·사분면 꼬리를 직접 계산
+  · 상대강도를 비율식으로 통일하고 여섯 기간 모두 계산
+  · 섹터별 4% 돌파 카운트 추가 (상관 기반 근사 분류)
+  · yfinance 가 막히면 Stooq 로 보충
 
 브레스 정의는 Stockbee Market Monitor 를 따른다.
 T2108 은 원래 Worden 지표라 그대로 가져올 수 없어 같은 정의(40일선 위 비율)로 직접 계산한다.
@@ -14,6 +21,7 @@ T2108 은 원래 Worden 지표라 그대로 가져올 수 없어 같은 정의(4
 """
 from __future__ import annotations
 import argparse, io, json, os, sys, time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 
 import numpy as np
@@ -31,11 +39,16 @@ THEMES  = ["SMH","IGV","SKYY","GRID","URA","XOP","ITA","ARKX","BOTZ","CIBR",
            "WGMI","IBIT","ETHA"]          # 크립토는 이 3개만
 ETFS    = sorted(set(MACRO + SECTORS + THEMES))
 
-MIN_PRICE   = 3.0        # 저가주 제외
-MIN_VOL     = 100_000    # 최소 거래량(주) — Stockbee 필터
+# Stockbee TC2000 v12.4 스캔 필터 (스캔별로 다르다 — 전역 필터 아님)
+VOL_4PCT    = 100_000    # 4% 스캔: 당일 거래량 ≥ 10만주 AND V > V1
+DOLLAR_VOL  = 250_000    # 25%/50%/13% 스캔: 20일 평균 종가×거래량 ≥ $250K
+MIN_C20     = 5.0        # 월간 스캔: 20일 전 종가 ≥ $5
 BREADTH_DAYS = 60        # 매 실행 시 다시 계산할 브레스 일수
 HISTORY_KEEP = 250       # data.json 에 남길 최대 일수
-LOOKBACK_DAYS = 400      # 내려받을 일봉 기간(달력일)
+SERIES_KEEP = 280        # 내보낼 ETF 종가 일수
+LOOKBACK_DAYS = 420      # 내려받을 일봉 기간(달력일)
+SECTOR_MIN_CORR = 0.35   # 이 값 미만이면 섹터 미분류
+SECTOR_CORR_WIN = 120    # 상관 계산에 쓸 거래일
 
 UA = {"User-Agent": "Mozilla/5.0 (compatible; sector-dashboard/1.0)"}
 
@@ -84,8 +97,9 @@ def download(tickers: list[str], period_days: int) -> tuple[pd.DataFrame, pd.Dat
         chunk = tickers[i:i + B]
         for attempt in range(3):
             try:
+                start = (datetime.now(timezone.utc) - pd.Timedelta(days=period_days)).strftime("%Y-%m-%d")
                 df = yf.download(
-                    chunk, period=f"{period_days}d", interval="1d",
+                    chunk, start=start, interval="1d",
                     auto_adjust=False, progress=False, threads=True, group_by="column",
                 )
                 if df is None or df.empty:
@@ -110,21 +124,46 @@ def download(tickers: list[str], period_days: int) -> tuple[pd.DataFrame, pd.Dat
     return C, V
 
 
-def stooq_close(ticker: str) -> pd.Series | None:
-    """yfinance 가 막혔을 때의 예비 경로 (서버에서 부르므로 CORS 무관)."""
-    sym = {"^VIX": "^vix", "^TNX": "10usy.b", "DX-Y.NYB": "dx.f"}.get(ticker, ticker.lower() + ".us")
+def stooq_one(ticker: str):
+    """Stooq 일봉 하나. 서버에서 부르므로 CORS 무관."""
+    sym = {"^VIX": "^vix", "^TNX": "10usy.b", "DX-Y.NYB": "dx.f"}.get(
+        ticker, ticker.lower().replace(".", "-") + ".us")
     try:
-        r = requests.get(f"https://stooq.com/q/d/l/?s={sym}&i=d", headers=UA, timeout=30)
+        r = requests.get(f"https://stooq.com/q/d/l/?s={sym}&i=d", headers=UA, timeout=25)
         df = pd.read_csv(io.StringIO(r.text))
-        if "Close" not in df:
-            return None
-        s = pd.Series(df["Close"].values, index=pd.to_datetime(df["Date"]))
-        return s.dropna()
+        if "Close" not in df or len(df) < 30:
+            return None, None
+        idx = pd.to_datetime(df["Date"])
+        c = pd.Series(df["Close"].values, index=idx, name=ticker).dropna()
+        v = pd.Series(df["Volume"].values, index=idx, name=ticker) if "Volume" in df else None
+        return c, v
     except Exception:
-        return None
+        return None, None
+
+
+def stooq_fill(C: pd.DataFrame, V: pd.DataFrame, wanted: list[str], workers=12):
+    """yfinance 가 놓친 티커를 Stooq 로 메운다."""
+    missing = [t for t in wanted if t not in C.columns or C[t].dropna().empty]
+    if not missing:
+        return C, V, 0
+    print(f"  Stooq 로 {len(missing)}개 보충 시도")
+    got = 0
+    with ThreadPoolExecutor(max_workers=workers) as ex:
+        for t, (c, v) in zip(missing, ex.map(stooq_one, missing)):
+            if c is None:
+                continue
+            C[t] = c
+            if v is not None:
+                V[t] = v
+            got += 1
+    print(f"  {got}개 보충됨")
+    return C.sort_index(), V.sort_index(), got
 
 
 # ─────────────────────── 계산 ───────────────────────
+PERIOD_N = {"d1": 1, "w1": 5, "m1": 21, "m3": 63, "m6": 126}
+
+
 def pct_back(s: pd.Series, n: int):
     s = s.dropna()
     if len(s) < n + 1:
@@ -143,67 +182,139 @@ def ytd_pct(s: pd.Series):
     return None if not base else round(float(s.iloc[-1] / base - 1) * 100, 2)
 
 
+def rel_pct(a, b):
+    """상대강도 = 비율식.  (1+a)/(1+b) - 1.   단순 차이(a-b)와는 다르다."""
+    if a is None or b is None:
+        return None
+    denom = 1 + b / 100.0
+    if denom == 0:
+        return None
+    return round(((1 + a / 100.0) / denom - 1) * 100, 2)
+
+
 def quotes_block(C: pd.DataFrame) -> dict:
     out = {}
     bench = C[BENCH].dropna() if BENCH in C else None
+    bref = {}
+    if bench is not None:
+        for p, n in PERIOD_N.items():
+            bref[p] = pct_back(bench, n)
+        bref["ytd"] = ytd_pct(bench)
+
     for t in C.columns:
         s = C[t].dropna()
         if len(s) < 10:
             continue
-        row = {
-            "px": round(float(s.iloc[-1]), 4),
-            "d1": pct_back(s, 1), "w1": pct_back(s, 5), "m1": pct_back(s, 21),
-            "m3": pct_back(s, 63), "m6": pct_back(s, 126), "ytd": ytd_pct(s),
-        }
-        for n, key in ((5, "rs_w1"), (21, "rs_m1"), (63, "rs_m3")):
-            if bench is not None and len(bench) > n:
-                a, b = pct_back(s, n), pct_back(bench, n)
-                row[key] = None if (a is None or b is None) else round(a - b, 2)
+        row = {"px": round(float(s.iloc[-1]), 4)}
+        for p, n in PERIOD_N.items():
+            row[p] = pct_back(s, n)
+        row["ytd"] = ytd_pct(s)
+        for p in list(PERIOD_N) + ["ytd"]:            # 여섯 기간 전부
+            row["rs_" + p] = rel_pct(row[p], bref.get(p))
         for win, key in ((50, "a50"), (200, "a200")):
             row[key] = bool(s.iloc[-1] > s.tail(win).mean()) if len(s) >= win else None
-        out[MACRO_ALIAS.get(t, t)] = row
+        key = MACRO_ALIAS.get(t, t)
+        if key == "US10Y" and row.get("px") is not None:
+            row["px"] = round(row["px"] / 10.0, 3)   # ^TNX 는 수익률×10 스케일
+        out[key] = row
     return out
 
 
-def breadth_block(C: pd.DataFrame, V: pd.DataFrame, days: int) -> list[dict]:
-    """Stockbee Market Monitor 필드를 일자별로 계산."""
+def series_block(C: pd.DataFrame):
+    """공통 날짜축 + 티커별 종가 배열. 대시보드가 이걸로 순위변화·꼬리를 계산한다."""
+    C = C.tail(SERIES_KEEP)
+    dates = [d.strftime("%Y-%m-%d") for d in C.index]
+    ser = {}
+    for t in C.columns:
+        col = C[t]
+        if col.dropna().empty:
+            continue
+        key = MACRO_ALIAS.get(t, t)
+        div = 10.0 if key == "US10Y" else 1.0
+        ser[key] = [None if pd.isna(x) else round(float(x) / div, 4) for x in col]
+    return dates, ser
+
+
+def breadth_block(C: pd.DataFrame, V: pd.DataFrame, days: int, sector_map=None):
+    """Stockbee Market Monitor — TC2000 v12.4 공개 스캔 공식을 그대로 구현.
+    https://stockbee.blogspot.com/2014/08/how-i-get-market-monitor-numbers.html
+    (rows, sectors_today) 반환."""
     C = C.sort_index()
     V = V.reindex(index=C.index, columns=C.columns)
 
-    liquid = V.rolling(20, min_periods=5).mean() >= MIN_VOL
-    valid = (C >= MIN_PRICE) & liquid & C.notna()
-
     r1 = C.pct_change(1) * 100
-    vol_up = V > V.shift(1)                       # 4% 스캔은 거래량 증가 조건 포함
-    up4 = ((r1 >= 4) & vol_up & valid).sum(axis=1)
-    dn4 = ((r1 <= -4) & vol_up & valid).sum(axis=1)
+    # 4%: 100*(C-C1)/C1 >= 4 AND V >= 100000 AND V > V1   (가격·달러볼륨 필터 없음)
+    vol_ok = (V >= VOL_4PCT) & (V > V.shift(1))
+    up4_mask = (r1 >= 4) & vol_ok
+    dn4_mask = (r1 <= -4) & vol_ok
+    up4, dn4 = up4_mask.sum(axis=1), dn4_mask.sum(axis=1)
 
-    def moved(n, pct, up=True):
-        ch = C.pct_change(n) * 100
-        cond = (ch >= pct) if up else (ch <= -pct)
-        return (cond & valid).sum(axis=1)
+    # 25%/50%/13% 스캔 공통 필터: AVGC20 * AVGV20 >= 250000
+    dollar = (C.rolling(20, min_periods=20).mean()
+              * V.rolling(20, min_periods=20).mean()) >= DOLLAR_VOL
 
-    q25u, q25d = moved(65, 25, True), moved(65, 25, False)
-    m25u, m25d = moved(20, 25, True), moved(20, 25, False)
-    m50u, m50d = moved(20, 50, True), moved(20, 50, False)
-    u13, d13 = moved(34, 13, True), moved(34, 13, False)
+    # 분기: 65일 최저/최고 "종가" 대비 (65일 전 종가가 아니다!)
+    minc65 = C.rolling(65, min_periods=65).min()
+    maxc65 = C.rolling(65, min_periods=65).max()
+    q25u = ((100 * ((C + .01) - (minc65 + .01)) / (minc65 + .01) >= 25) & dollar).sum(axis=1)
+    q25d = ((100 * ((C + .01) - (maxc65 + .01)) / (maxc65 + .01) <= -25) & dollar).sum(axis=1)
 
+    # 월간: C20 >= 5 AND 달러볼륨 AND 20일 전 종가 대비 (이건 point-to-point 맞음)
+    c20 = C.shift(20).replace(0, np.nan)
+    mch = 100 * (C - c20) / c20
+    mfil = (c20 >= MIN_C20) & dollar
+    m25u = ((mch >= 25) & mfil).sum(axis=1)
+    m25d = ((mch <= -25) & mfil).sum(axis=1)
+    m50u = ((mch >= 50) & mfil).sum(axis=1)
+    m50d = ((mch <= -50) & mfil).sum(axis=1)
+
+    # 13%/34일: 34일 최저/최고 종가 대비
+    minc34 = C.rolling(34, min_periods=34).min()
+    maxc34 = C.rolling(34, min_periods=34).max()
+    u13 = ((100 * ((C + .01) - (minc34 + .01)) / (minc34 + .01) >= 13) & dollar).sum(axis=1)
+    d13 = ((100 * ((C + .01) - (maxc34 + .01)) / (maxc34 + .01) <= -13) & dollar).sum(axis=1)
+
+    # 추세 폭: T2108 계열은 Worden 지표라 정의(이동평균선 위 비율)만 같게 계산.
+    # Worden 은 필터 없이 전 종목 기준 — 여기서도 필터 없이 계산한다.
     def above(win):
         ma = C.rolling(win, min_periods=win).mean()
-        ok = (C > ma) & valid
-        n = (valid & ma.notna()).sum(axis=1)
+        ok = (C > ma)
+        n = ma.notna().sum(axis=1)
         return (ok.sum(axis=1) / n.replace(0, np.nan) * 100).round(1)
 
     t2108, a50, a200 = above(40), above(50), above(200)
 
     hi252 = C.rolling(252, min_periods=60).max()
     lo252 = C.rolling(252, min_periods=60).min()
-    nh = ((C >= hi252) & valid).sum(axis=1)
-    nl = ((C <= lo252) & valid).sum(axis=1)
+    nh = (C >= hi252).sum(axis=1)
+    nl = (C <= lo252).sum(axis=1)
 
     r5 = (up4.rolling(5).sum() / dn4.rolling(5).sum().replace(0, np.nan)).round(2)
     r10 = (up4.rolling(10).sum() / dn4.rolling(10).sum().replace(0, np.nan)).round(2)
-    uni = valid.sum(axis=1)
+    uni = C.notna().sum(axis=1)
+
+    # 섹터별 요약 (최신 거래일 기준, 4% 스캔과 같은 조건)
+    sectors = []
+    if sector_map and len(C.index):
+        m25u_mask = (mch >= 25) & mfil
+        groups = {}
+        for tk, sec in sector_map.items():
+            groups.setdefault(sec, []).append(tk)
+        d_last = C.index[-1]
+        for sec, cols in groups.items():
+            cols = [c for c in cols if c in C.columns]
+            if not cols:
+                continue
+            u_ser = up4_mask[cols].sum(axis=1)
+            sectors.append({
+                "s": sec,
+                "up4": int(u_ser.loc[d_last]),
+                "dn4": int(dn4_mask[cols].sum(axis=1).loc[d_last]),
+                "u5": int(u_ser.tail(5).sum()),
+                "m25u": int(m25u_mask[cols].sum(axis=1).loc[d_last]),
+                "n": len(cols),
+            })
+        sectors.sort(key=lambda r: -r["up4"])
 
     def val(s, d):
         v = s.get(d)
@@ -223,7 +334,40 @@ def breadth_block(C: pd.DataFrame, V: pd.DataFrame, days: int) -> list[dict]:
             "t2108": val(t2108, d), "a50": val(a50, d), "a200": val(a200, d),
             "nh": val(nh, d), "nl": val(nl, d), "universe": val(uni, d),
         })
-    return rows
+    return rows, sectors
+
+
+def build_sector_map(C_uni: pd.DataFrame, C_etf: pd.DataFrame) -> dict:
+    """
+    종목을 11개 SPDR 섹터 중 하나로 붙인다.
+    무료로 GICS 를 통째로 받을 방법이 마땅치 않아, 최근 120거래일 일간수익률의
+    상관이 가장 높은 섹터 ETF 로 분류한다. 근사값이며 상관이 낮으면 미분류로 둔다.
+    """
+    secs = [s for s in SECTORS if s in C_etf.columns]
+    if not secs or C_uni.empty:
+        return {}
+    ru = C_uni.pct_change().tail(SECTOR_CORR_WIN)
+    re_ = C_etf[secs].pct_change().reindex(ru.index).tail(SECTOR_CORR_WIN)
+
+    U = ru.to_numpy(dtype="float64")
+    E = re_.to_numpy(dtype="float64")
+    ok = ~np.isnan(E).any(axis=1)
+    U, E = U[ok], E[ok]
+    if len(U) < 40:
+        return {}
+    with np.errstate(invalid="ignore"):
+        Um = np.nanmean(U, axis=0); Us = np.nanstd(U, axis=0)
+        Uz = np.nan_to_num((U - Um) / np.where(Us == 0, np.nan, Us))
+        Ez = (E - E.mean(axis=0)) / np.where(E.std(axis=0) == 0, np.nan, E.std(axis=0))
+    corr = np.nan_to_num((Uz.T @ np.nan_to_num(Ez)) / len(U), nan=-1.0)
+    best, bestv = corr.argmax(axis=1), corr.max(axis=1)
+
+    out = {}
+    for i, tk in enumerate(ru.columns):
+        if bestv[i] >= SECTOR_MIN_CORR:
+            out[tk] = secs[best[i]]
+    print(f"  섹터 분류 {len(out)}/{len(ru.columns)}개 (상관 {SECTOR_MIN_CORR} 이상)")
+    return out
 
 
 # ─────────────────────── 메인 ───────────────────────
@@ -231,29 +375,34 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--limit", type=int, default=None, help="유니버스 상한 (테스트용)")
     ap.add_argument("--quotes-only", action="store_true")
+    ap.add_argument("--no-sector", action="store_true")
     ap.add_argument("--out", default="data.json")
     args = ap.parse_args()
 
     print("1) ETF 시세")
-    C_etf, _ = download(ETFS, LOOKBACK_DAYS)
-    missing = [t for t in ETFS if t not in C_etf.columns or C_etf[t].dropna().empty]
-    for t in missing:                       # 예비 경로
-        s = stooq_close(t)
-        if s is not None and len(s):
-            C_etf[t] = s
-            print(f"  · {t} → Stooq 로 보충")
+    C_etf, V_etf = download(ETFS, LOOKBACK_DAYS)
+    C_etf, V_etf, _ = stooq_fill(C_etf, V_etf, ETFS)
     quotes = quotes_block(C_etf)
-    print(f"  {len(quotes)}개 종목")
+    dates, series = series_block(C_etf)
+    print(f"  {len(quotes)}개 종목 / 시계열 {len(dates)}일")
 
-    breadth, universe, bsrc = [], None, None
+    breadth, sectors, universe, bsrc, secmap = [], [], None, None, {}
     if not args.quotes_only:
         print("2) 유니버스")
         syms = load_universe(args.limit)
         print("3) 전 종목 일봉 (몇 분 걸린다)")
         C, V = download(syms, LOOKBACK_DAYS)
+        if C.empty or C.shape[1] < len(syms) * 0.3:
+            print("  ! yfinance 수집이 부실하다 — Stooq 로 보충", file=sys.stderr)
+            C, V, _ = stooq_fill(C, V, syms)
         print(f"  받은 종목 {C.shape[1]}개 / 거래일 {C.shape[0]}일")
-        print("4) 브레스 계산")
-        breadth = breadth_block(C, V, BREADTH_DAYS)
+
+        if not args.no_sector:
+            print("4) 섹터 분류")
+            secmap = build_sector_map(C, C_etf)
+
+        print("5) 브레스 계산")
+        breadth, sectors = breadth_block(C, V, BREADTH_DAYS, secmap or None)
         if breadth:
             universe = breadth[-1]["universe"]
             bsrc = "자체 계산 (yfinance)"
@@ -271,21 +420,25 @@ def main():
         merged[r["d"]] = r
     history = [merged[k] for k in sorted(merged)][-HISTORY_KEEP:]
 
-    asof = None
-    if BENCH in C_etf and not C_etf[BENCH].dropna().empty:
-        asof = C_etf[BENCH].dropna().index[-1].strftime("%Y-%m-%d")
+    asof = dates[-1] if dates else prev.get("asof")
 
     out = {
         "asof": asof,
         "generated": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-        "universe": universe or (history[-1]["universe"] if history else None),
+        "universe": universe or (history[-1].get("universe") if history else None),
         "breadth_source": bsrc or prev.get("breadth_source"),
+        "sector_map": "상관 기반 근사" if secmap else prev.get("sector_map"),
+        "sectors": sectors or prev.get("sectors"),
+        "bench": BENCH,
+        "dates": dates or prev.get("dates"),
+        "series": series or prev.get("series"),
         "quotes": quotes or prev.get("quotes", {}),
         "breadth": {"history": history},
     }
     with open(args.out, "w", encoding="utf-8") as f:
         json.dump(out, f, ensure_ascii=False, separators=(",", ":"))
-    print(f"완료 → {args.out}  ({os.path.getsize(args.out)/1024:.0f} KB, 브레스 {len(history)}일)")
+    print(f"완료 → {args.out}  ({os.path.getsize(args.out)/1024:.0f} KB, "
+          f"브레스 {len(history)}일, 시계열 {len(series)}종목)")
 
 
 if __name__ == "__main__":
