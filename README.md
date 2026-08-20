@@ -12,10 +12,26 @@
 파일 하나짜리 웹페이지 + 하루 한 번 도는 데이터 생성 스크립트로 되어 있다.
 
 ```
-sector-dashboard.html          화면. 이 파일 하나로 동작한다.
+sector-dashboard.html          화면
 build_data.py                  data.json 을 만드는 스크립트
 .github/workflows/daily.yml    매일 자동 실행
+manifest.json                  앱 설치 정보 (PWA)
+sw.js                          오프라인 캐시 (서비스 워커)
+icon.svg / icon-192.png / icon-512.png
+icon-maskable-512.png / apple-touch-icon.png
 ```
+
+## 앱으로 설치하기
+
+위 아이콘·manifest·sw 파일을 `sector-dashboard.html` 과 **같은 폴더(저장소 루트)** 에 두면
+설치형 앱(PWA)이 된다.
+
+- **아이폰** Safari 로 열고 공유 → 홈 화면에 추가 (Safari 여야 한다. Chrome 은 안 된다)
+- **안드로이드** Chrome 으로 열면 설치 배너가 뜬다. 없으면 ⋮ → 앱 설치
+- **데스크톱** Chrome/Edge 주소창 오른쪽 설치 아이콘, 또는 ⋮ → 캐스트·저장 및 공유 → 페이지를 앱으로 설치
+
+설치하면 주소창 없는 전체화면으로 열리고, 오프라인에서도 마지막으로 본 데이터가 표시된다.
+새 버전을 저장소에 올리면 다음에 열 때 자동으로 반영된다(네트워크 우선 캐시).
 
 ## 자동 수집 붙이기 (30분)
 

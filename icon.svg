@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <rect width="512" height="512" rx="114" fill="#FBFBFC"/>
+  <!-- T2108 게이지: 양끝 극단(빨강=바닥권, 초록=과열), 가운데는 무신호 구간 -->
+  <path d="M96 322 A160 160 0 0 1 416 322"
+        fill="none" stroke="#D8DDE4" stroke-width="44" stroke-linecap="round"/>
+  <path d="M96 322 A160 160 0 0 1 152 202"
+        fill="none" stroke="#C0362C" stroke-width="44" stroke-linecap="round"/>
+  <path d="M360 202 A160 160 0 0 1 416 322"
+        fill="none" stroke="#157A4F" stroke-width="44" stroke-linecap="round"/>
+  <!-- 바늘: 중립보다 살짝 위 -->
+  <line x1="256" y1="322" x2="214" y2="188"
+        stroke="#22303F" stroke-width="24" stroke-linecap="round"/>
+  <circle cx="256" cy="322" r="32" fill="#22303F"/>
+  <circle cx="256" cy="322" r="13" fill="#FBFBFC"/>
+</svg>
