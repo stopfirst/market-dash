@@ -82,6 +82,9 @@ def parse_stockbee(df: pd.DataFrame) -> dict:
         k = _sb_col(str(c))
         if k and k not in cols.values():
             cols[c] = k
+    df = df.loc[:, [c for c in df.columns
+                    if str(c).strip() and str(c).lower() not in ("nan", "none")
+                    and not str(c).strip().isdigit()]]
     date_col = None
     for c in df.columns:
         if "date" in str(c).lower():
@@ -107,29 +110,58 @@ def parse_stockbee(df: pd.DataFrame) -> dict:
     return out
 
 
+def _find_header(df: pd.DataFrame) -> pd.DataFrame:
+    """구글 pubhtml 표는 행번호 열·병합 제목행이 섞여 온다. 'Date'가 든 행을 찾아 헤더로 세운다."""
+    for i in range(min(8, len(df))):
+        vals = [str(x).strip().lower() for x in df.iloc[i].tolist()]
+        if any(v == "date" or v.startswith("date") for v in vals):
+            out = df.iloc[i + 1:].copy()
+            out.columns = [str(x) for x in df.iloc[i]]
+            return out
+    return df
+
+
 def fetch_stockbee() -> dict:
-    """Stockbee Market Monitor 공개 구글시트에서 최근 값을 읽는다. 실패하면 {}."""
-    try:
-        r = requests.get(STOCKBEE_SHEET + "&output=csv", headers=UA, timeout=40)
-        if r.ok and "," in r.text[:2000] and "<html" not in r.text[:200].lower():
-            df = pd.read_csv(io.StringIO(r.text))
-            got = parse_stockbee(df)
-            if got:
-                return got
-    except Exception:
-        pass
-    try:  # csv 게시가 막혀 있으면 HTML 표로
-        r = requests.get(STOCKBEE_SHEET + "&output=html", headers=UA, timeout=40)
-        for df in pd.read_html(io.StringIO(r.text)):
-            if df.shape[0] > 5 and df.shape[1] > 8:
-                if not any("date" in str(c).lower() for c in df.columns):
-                    df.columns = df.iloc[0]
-                    df = df.iloc[1:]
-                got = parse_stockbee(df)
+    """Stockbee Market Monitor 공개 구글시트. 여러 주소를 차례로 시도하고,
+    실패 원인을 로그로 남긴다. 전부 실패하면 {} (자체 계산으로 폴백)."""
+    key = "0Am_cU8NLIU20dEhiQnVHN3Nnc3B1S3J6eGhKZFo0N3c"
+    tries = [
+        ("legacy-csv",  f"https://docs.google.com/spreadsheet/pub?key={key}&output=csv"),
+        ("old-csv",     f"https://spreadsheets.google.com/pub?key={key}&output=csv"),
+        ("widget-html", f"https://docs.google.com/spreadsheet/pub?key={key}&output=html&widget=true"),
+        ("pub-html",    f"https://docs.google.com/spreadsheet/pub?key={key}"),
+    ]
+    for name, url in tries:
+        try:
+            r = requests.get(url, headers=UA, timeout=40, allow_redirects=True)
+            if not r.ok:
+                print(f"  · {name}: HTTP {r.status_code}")
+                continue
+            head = r.text[:400].lower()
+            if "<html" not in head and "," in r.text[:2000]:
+                got = parse_stockbee(pd.read_csv(io.StringIO(r.text)))
                 if got:
+                    print(f"  · {name}: OK (csv)")
                     return got
-    except Exception:
-        pass
+                print(f"  · {name}: csv 파싱됐으나 필드 매칭 실패")
+                continue
+            # HTML → 표 추출
+            try:
+                tables = pd.read_html(io.StringIO(r.text))
+            except ImportError as e:
+                print(f"  · {name}: HTML 파서 없음({e}) — daily.yml 에 lxml 설치 필요")
+                continue
+            except ValueError:
+                print(f"  · {name}: HTML 에 표 없음")
+                continue
+            for df in sorted(tables, key=lambda d: -(d.shape[0] * d.shape[1])):
+                got = parse_stockbee(_find_header(df))
+                if got:
+                    print(f"  · {name}: OK (html, {df.shape[0]}행)")
+                    return got
+            print(f"  · {name}: 표 {len(tables)}개 중 매칭 없음")
+        except Exception as e:
+            print(f"  · {name}: {type(e).__name__} {e}")
     return {}
 
 
