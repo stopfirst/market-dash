@@ -820,10 +820,15 @@ function renderQuad(){
 
   const tails=pts.map(p=>{
     if(p.tail.length<2) return "";
+    const col=qcol(p.x,p.y);
     const path=p.tail.map(q=>`${sx(q[0]).toFixed(1)},${sy(q[1]).toFixed(1)}`).join(" ");
+    // 과거→현재로 갈수록 진해지는 점 + 흰 테두리 위에 사분면 색 꼬리
     const dots=p.tail.slice(0,-1).map((q,i)=>
-      `<circle cx="${sx(q[0]).toFixed(1)}" cy="${sy(q[1]).toFixed(1)}" r="1.6" fill="#AEB8C4" fill-opacity="${(.25+.12*i).toFixed(2)}"/>`).join("");
-    return `<polyline points="${path}" fill="none" stroke="#B9C2CE" stroke-width="1.3" stroke-opacity=".65" stroke-linejoin="round"/>`+dots;
+      `<circle cx="${sx(q[0]).toFixed(1)}" cy="${sy(q[1]).toFixed(1)}" r="${(1.4+i*0.35).toFixed(1)}" fill="${col}" fill-opacity="${(.20+.13*i).toFixed(2)}"/>`).join("");
+    return `<g class="qtail" data-tail="${p.t}">
+      <polyline points="${path}" fill="none" stroke="#FFFFFF" stroke-width="4" stroke-opacity=".9" stroke-linejoin="round" stroke-linecap="round"/>
+      <polyline points="${path}" fill="none" stroke="${col}" stroke-width="1.8" stroke-opacity=".5" stroke-linejoin="round" stroke-linecap="round"/>
+      ${dots}</g>`;
   }).join("");
 
   // 라벨 충돌 회피
@@ -837,7 +842,7 @@ function renderQuad(){
   const heads=labs.map(({p,lx,ly})=>{
     const col=qcol(p.x,p.y);
     return `<g data-qt="${p.t}" style="cursor:pointer">
-      <circle cx="${sx(p.x).toFixed(1)}" cy="${sy(p.y).toFixed(1)}" r="4.4" fill="${col}"/>
+      <circle cx="${sx(p.x).toFixed(1)}" cy="${sy(p.y).toFixed(1)}" r="4.6" fill="${col}" stroke="#FFFFFF" stroke-width="1.6"/>
       <circle cx="${sx(p.x).toFixed(1)}" cy="${sy(p.y).toFixed(1)}" r="9" fill="transparent"/>
       <text x="${lx.toFixed(1)}" y="${ly.toFixed(1)}" font-size="9" font-weight="600" fill="#3C4654"
         font-family="ui-monospace,monospace" style="paint-order:stroke" stroke="#FCFCFD" stroke-width="3">${p.t}</text>
@@ -1026,7 +1031,12 @@ function bind(){
   document.addEventListener("click",e=>{
     if(e.target.closest("#sheet")) return;
     const q=e.target.closest("g[data-qt]");
-    if(q){ sheetTicker(q.dataset.qt); return; }
+    if(q){
+      $$("#quadSvg .qtail").forEach(g=>{
+        g.style.opacity = g.dataset.tail===q.dataset.qt ? "1" : ".12";
+      });
+      setTimeout(()=>$$("#quadSvg .qtail").forEach(g=>g.style.opacity=""),2600);
+      sheetTicker(q.dataset.qt); return; }
     const el=e.target.closest(".tile[data-t]")||e.target.closest(".row[data-t]");
     if(el) sheetTicker(el.dataset.t); });
   $("#obFeed").onclick=sheetFeed; $("#obTry").onclick=refreshAll; $("#obPaste").onclick=sheetPaste;

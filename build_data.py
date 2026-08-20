@@ -121,7 +121,32 @@ def download(tickers: list[str], period_days: int) -> tuple[pd.DataFrame, pd.Dat
     V = pd.concat(vols, axis=1) if vols else pd.DataFrame()
     C = C.loc[:, ~C.columns.duplicated()].sort_index()
     V = V.loc[:, ~V.columns.duplicated()].sort_index()
+
+    # 빠졌거나 빈 티커는 한 번 더 시도
+    missing = [t for t in tickers if t not in C.columns or C[t].dropna().empty]
+    if missing and len(missing) < len(tickers):
+        try:
+            time.sleep(3)
+            C2, V2 = _retry_batch(missing, period_days)
+            for t in C2.columns:
+                if t not in C.columns or C[t].dropna().empty:
+                    C[t] = C2[t]; V[t] = V2.get(t)
+            print(f"  재시도로 {len([t for t in missing if t in C.columns and not C[t].dropna().empty])}/{len(missing)}개 보충")
+        except Exception:
+            pass
     return C, V
+
+
+def _retry_batch(tickers, period_days):
+    import yfinance as yf
+    start = (datetime.now(timezone.utc) - pd.Timedelta(days=period_days)).strftime("%Y-%m-%d")
+    df = yf.download(tickers, start=start, interval="1d",
+                     auto_adjust=False, progress=False, threads=True, group_by="column")
+    c = df["Close"] if "Close" in df else pd.DataFrame()
+    v = df["Volume"] if "Volume" in df else pd.DataFrame()
+    if isinstance(c, pd.Series):
+        c = c.to_frame(tickers[0]); v = v.to_frame(tickers[0])
+    return c.sort_index(), v.sort_index()
 
 
 def stooq_one(ticker: str):
@@ -215,7 +240,10 @@ def quotes_block(C: pd.DataFrame) -> dict:
             row[key] = bool(s.iloc[-1] > s.tail(win).mean()) if len(s) >= win else None
         key = MACRO_ALIAS.get(t, t)
         if key == "US10Y" and row.get("px") is not None:
-            row["px"] = round(row["px"] / 10.0, 3)   # ^TNX 는 수익률×10 스케일
+            # 벤더에 따라 ^TNX 가 % (4.7) 로 오기도, 지수식 ×10 (47.0) 으로 오기도 한다
+            med = float(s.tail(60).median())
+            if med > 20:
+                row["px"] = round(row["px"] / 10.0, 3)
         out[key] = row
     return out
 
@@ -230,7 +258,11 @@ def series_block(C: pd.DataFrame):
         if col.dropna().empty:
             continue
         key = MACRO_ALIAS.get(t, t)
-        div = 10.0 if key == "US10Y" else 1.0
+        div = 1.0
+        if key == "US10Y":
+            med = col.dropna().tail(60).median()
+            if med is not None and med > 20:
+                div = 10.0                      # ^TNX 지수식(×10)일 때만 나눈다
         ser[key] = [None if pd.isna(x) else round(float(x) / div, 4) for x in col]
     return dates, ser
 
@@ -242,6 +274,11 @@ def breadth_block(C: pd.DataFrame, V: pd.DataFrame, days: int, sector_map=None):
     C = C.sort_index()
     V = V.reindex(index=C.index, columns=C.columns)
 
+    # 안 거래된 날의 결측을 직전 종가로 메운다(최대 10일). 이걸 안 하면
+    # 유동성 낮은 종목이 롤링 창의 결측 하루 때문에 장기 스캔에서 전부 빠진다.
+    C = C.ffill(limit=10)
+    Vavg = V.fillna(0)          # 평균 거래량 계산용 — 안 거래된 날은 0으로
+
     r1 = C.pct_change(1) * 100
     # 4%: 100*(C-C1)/C1 >= 4 AND V >= 100000 AND V > V1   (가격·달러볼륨 필터 없음)
     vol_ok = (V >= VOL_4PCT) & (V > V.shift(1))
@@ -250,12 +287,12 @@ def breadth_block(C: pd.DataFrame, V: pd.DataFrame, days: int, sector_map=None):
     up4, dn4 = up4_mask.sum(axis=1), dn4_mask.sum(axis=1)
 
     # 25%/50%/13% 스캔 공통 필터: AVGC20 * AVGV20 >= 250000
-    dollar = (C.rolling(20, min_periods=20).mean()
-              * V.rolling(20, min_periods=20).mean()) >= DOLLAR_VOL
+    dollar = (C.rolling(20, min_periods=16).mean()
+              * Vavg.rolling(20, min_periods=16).mean()) >= DOLLAR_VOL
 
     # 분기: 65일 최저/최고 "종가" 대비 (65일 전 종가가 아니다!)
-    minc65 = C.rolling(65, min_periods=65).min()
-    maxc65 = C.rolling(65, min_periods=65).max()
+    minc65 = C.rolling(65, min_periods=52).min()
+    maxc65 = C.rolling(65, min_periods=52).max()
     q25u = ((100 * ((C + .01) - (minc65 + .01)) / (minc65 + .01) >= 25) & dollar).sum(axis=1)
     q25d = ((100 * ((C + .01) - (maxc65 + .01)) / (maxc65 + .01) <= -25) & dollar).sum(axis=1)
 
@@ -269,15 +306,15 @@ def breadth_block(C: pd.DataFrame, V: pd.DataFrame, days: int, sector_map=None):
     m50d = ((mch <= -50) & mfil).sum(axis=1)
 
     # 13%/34일: 34일 최저/최고 종가 대비
-    minc34 = C.rolling(34, min_periods=34).min()
-    maxc34 = C.rolling(34, min_periods=34).max()
+    minc34 = C.rolling(34, min_periods=28).min()
+    maxc34 = C.rolling(34, min_periods=28).max()
     u13 = ((100 * ((C + .01) - (minc34 + .01)) / (minc34 + .01) >= 13) & dollar).sum(axis=1)
     d13 = ((100 * ((C + .01) - (maxc34 + .01)) / (maxc34 + .01) <= -13) & dollar).sum(axis=1)
 
     # 추세 폭: T2108 계열은 Worden 지표라 정의(이동평균선 위 비율)만 같게 계산.
     # Worden 은 필터 없이 전 종목 기준 — 여기서도 필터 없이 계산한다.
     def above(win):
-        ma = C.rolling(win, min_periods=win).mean()
+        ma = C.rolling(win, min_periods=max(10, int(win * 0.8))).mean()
         ok = (C > ma)
         n = ma.notna().sum(axis=1)
         return (ok.sum(axis=1) / n.replace(0, np.nan) * 100).round(1)
