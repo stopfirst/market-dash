@@ -1,0 +1,35 @@
+name: daily-data
+
+on:
+  schedule:
+    - cron: "30 22 * * 1-5"    # UTC 22:30 = 한국시간 07:30 (미국장 마감 뒤)
+  workflow_dispatch:           # 필요할 때 손으로도 돌릴 수 있음
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: 패키지 설치
+        run: pip install --quiet yfinance pandas numpy requests
+
+      - name: data.json 생성
+        run: python build_data.py --out data.json
+
+      - name: 커밋
+        run: |
+          git config user.name  "github-actions"
+          git config user.email "actions@github.com"
+          git add data.json
+          git diff --staged --quiet || git commit -m "data: $(date -u +%Y-%m-%d)"
+          git push
