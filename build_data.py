@@ -543,8 +543,17 @@ def main():
             prev = {}
     old = (prev.get("breadth") or {}).get("history") or []
     merged = {r["d"]: r for r in old}
+    # 자체 계산 병합: 이미 원본 시트(sb=1)로 채워진 행은 자체-전용 필드만 갱신한다.
+    # 이렇게 해야 시트가 하루 죽어도 이미 받아둔 원본 숫자가 자체값으로 퇴행하지 않는다.
+    SELF_KEYS = ("nh", "nl", "a50", "a200", "adv", "dec", "mco", "mcs")
     for r in breadth:
-        merged[r["d"]] = r
+        cur = merged.get(r["d"])
+        if cur and cur.get("sb"):
+            for k in SELF_KEYS:
+                if r.get(k) is not None:
+                    cur[k] = r[k]
+        else:
+            merged[r["d"]] = r
 
     # Stockbee 원본 시트가 있으면 겹치는 필드를 원본 값으로 덮는다.
     # NH/NL·%MA·맥클렐란·섹터별 카운트는 시트에 없으므로 자체 계산이 그대로 남는다.
@@ -555,6 +564,7 @@ def main():
             for d, vals in sb.items():
                 base = merged.get(d, {"d": d})
                 base.update(vals)
+                base["sb"] = 1                    # 출처 표시: 원본 시트
                 merged[d] = base
             bsrc = "Stockbee 원본 시트 · NH/NL·%MA·맥클렐란·섹터는 자체 계산"
             print(f"  {len(sb)}일 병합 (최신 {max(sb)})")
@@ -567,7 +577,7 @@ def main():
     out = {
         "asof": asof,
         "generated": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-        "universe": universe or (history[-1].get("universe") if history else None),
+        "universe": (history[-1].get("universe") if history else None) or universe,
         "breadth_source": bsrc or prev.get("breadth_source"),
         "sector_map": "상관 기반 근사" if secmap else prev.get("sector_map"),
         "sectors": sectors or prev.get("sectors"),

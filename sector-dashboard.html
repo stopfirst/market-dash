@@ -711,8 +711,7 @@ function renderMM(){
   const spLine=(label,vals,color,dec,zero)=>{
     const v2=vals.filter(isNum); if(v2.length<3) return "";
     const W=200,Hh=26;
-    const mn=Math.min(...v2,zero?0:Infinity===Infinity?Math.min(...v2):0), mx0=Math.max(...v2);
-    const lo=zero?Math.min(0,...v2):Math.min(...v2), hi=zero?Math.max(0,...v2):mx0;
+    const lo=zero?Math.min(0,...v2):Math.min(...v2), hi=zero?Math.max(0,...v2):Math.max(...v2);
     const rg=(hi-lo)||1;
     const Y=v=>Hh-((v-lo)/rg)*(Hh-3)-1.5;
     const pts=vals.map((v,i)=>isNum(v)?`${(i/(vals.length-1||1)*W).toFixed(1)},${Y(v).toFixed(1)}`:null).filter(Boolean).join(" ");
