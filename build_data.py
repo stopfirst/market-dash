@@ -127,23 +127,30 @@ def fetch_stockbee() -> dict:
     key = "0Am_cU8NLIU20dEhiQnVHN3Nnc3B1S3J6eGhKZFo0N3c"
     tries = [
         ("legacy-csv",  f"https://docs.google.com/spreadsheet/pub?key={key}&output=csv"),
+        ("gviz-csv",    f"https://docs.google.com/spreadsheet/gviz/tq?key={key}&tqx=out:csv"),
         ("old-csv",     f"https://spreadsheets.google.com/pub?key={key}&output=csv"),
+        ("old-gviz",    f"https://spreadsheets.google.com/tq?key={key}&tqx=out:csv"),
         ("widget-html", f"https://docs.google.com/spreadsheet/pub?key={key}&output=html&widget=true"),
         ("pub-html",    f"https://docs.google.com/spreadsheet/pub?key={key}"),
     ]
     for name, url in tries:
         try:
-            r = requests.get(url, headers=UA, timeout=40, allow_redirects=True)
+            bua = {"User-Agent": ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                                   "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36")}
+            r = requests.get(url, headers=bua, timeout=40, allow_redirects=True)
             if not r.ok:
                 print(f"  · {name}: HTTP {r.status_code}")
                 continue
             head = r.text[:400].lower()
             if "<html" not in head and "," in r.text[:2000]:
-                got = parse_stockbee(pd.read_csv(io.StringIO(r.text)))
+                raw = pd.read_csv(io.StringIO(r.text), header=None, dtype=str,
+                                  keep_default_na=False, on_bad_lines="skip")
+                got = parse_stockbee(_find_header(raw))
                 if got:
-                    print(f"  · {name}: OK (csv)")
+                    print(f"  · {name}: OK (csv, {len(got)}일)")
                     return got
-                print(f"  · {name}: csv 파싱됐으나 필드 매칭 실패")
+                snip = " ".join(r.text[:300].split())
+                print(f"  · {name}: csv 받았으나 필드 매칭 실패 | 앞부분: {snip[:160]}")
                 continue
             # HTML → 표 추출
             try:
@@ -159,7 +166,8 @@ def fetch_stockbee() -> dict:
                 if got:
                     print(f"  · {name}: OK (html, {df.shape[0]}행)")
                     return got
-            print(f"  · {name}: 표 {len(tables)}개 중 매칭 없음")
+            snip = " ".join(r.text[:200].split())
+            print(f"  · {name}: 표 {len(tables)}개 중 매칭 없음 | 응답 앞부분: {snip[:140]}")
         except Exception as e:
             print(f"  · {name}: {type(e).__name__} {e}")
     return {}
@@ -541,6 +549,13 @@ def main():
     print("1) ETF 시세")
     C_etf, V_etf = download(ETFS, LOOKBACK_DAYS)
     C_etf, V_etf, _ = stooq_fill(C_etf, V_etf, ETFS)
+    # DXY·^TNX 같은 24시간/장외 종목은 '오늘 진행 중' 시세가 마지막 봉으로 끼어든다.
+    # 미국 주식장의 마지막 완결일(SPY 기준) 이후 행은 잘라서, 모든 값을 종가 대 종가로 통일한다.
+    if BENCH in C_etf.columns and not C_etf[BENCH].dropna().empty:
+        cutoff = C_etf[BENCH].dropna().index[-1]
+        C_etf = C_etf.loc[C_etf.index <= cutoff]
+        V_etf = V_etf.loc[V_etf.index <= cutoff]
+        print(f"  마지막 완결 거래일: {cutoff.date()} (이후 미완성 봉 제거)")
     quotes = quotes_block(C_etf)
     dates, series = series_block(C_etf)
     print(f"  {len(quotes)}개 종목 / 시계열 {len(dates)}일")
