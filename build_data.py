@@ -22,7 +22,7 @@ T2108 은 원래 Worden 지표라 그대로 가져올 수 없어 같은 정의(4
 from __future__ import annotations
 import argparse, io, json, os, sys, time
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import numpy as np
 import pandas as pd
@@ -51,6 +51,25 @@ SECTOR_MIN_CORR = 0.35   # 이 값 미만이면 섹터 미분류
 SECTOR_CORR_WIN = 120    # 상관 계산에 쓸 거래일
 
 UA = {"User-Agent": "Mozilla/5.0 (compatible; sector-dashboard/1.0)"}
+SESSION = None   # main 에서 확정 거래일로 채운다
+
+
+# ─────────────────────── 거래일 판정 ───────────────────────
+def last_session_date():
+    """미국 주식장 기준 '마지막으로 마감이 확정된 거래일'.
+    뉴욕 시각 16:15 이전이면 전 거래일을 돌려준다(서머타임 자동 반영).
+    휴장일은 판별하지 않지만, 이 날짜 '이하'로만 자르므로 문제되지 않는다."""
+    try:
+        from zoneinfo import ZoneInfo
+        now = datetime.now(ZoneInfo("America/New_York"))
+    except Exception:                       # tzdata 없는 환경 대비: EST 고정
+        now = datetime.now(timezone.utc) - timedelta(hours=5)
+    d = now.date()
+    if now.hour * 60 + now.minute < 16 * 60 + 15:
+        d -= timedelta(days=1)
+    while d.weekday() >= 5:                 # 토·일 → 직전 금요일
+        d -= timedelta(days=1)
+    return d
 
 
 # ─────────────────────── Stockbee 원본 시트 ───────────────────────
@@ -543,19 +562,39 @@ def main():
     ap.add_argument("--quotes-only", action="store_true")
     ap.add_argument("--no-sector", action="store_true")
     ap.add_argument("--no-stockbee", action="store_true", help="원본 시트를 쓰지 않고 자체 계산만")
+    ap.add_argument("--force", action="store_true", help="최신이어도 다시 계산")
     ap.add_argument("--out", default="data.json")
     args = ap.parse_args()
 
+    global SESSION
+    SESSION = last_session_date()
+    sess_str = SESSION.strftime("%Y-%m-%d")
+
+    prev_peek = {}
+    if os.path.exists(args.out):
+        try:
+            prev_peek = json.load(open(args.out, encoding="utf-8"))
+        except Exception:
+            prev_peek = {}
+    if not args.force and prev_peek.get("asof") == sess_str:
+        hist = (prev_peek.get("breadth") or {}).get("history") or []
+        done = hist and hist[-1].get("d") == sess_str and (hist[-1].get("sb") or args.no_stockbee)
+        if done:
+            print(f"이미 {sess_str} 데이터가 최신입니다 — 건너뜁니다.")
+            return
+
+    print(f"기준 거래일: {sess_str}")
     print("1) ETF 시세")
     C_etf, V_etf = download(ETFS, LOOKBACK_DAYS)
     C_etf, V_etf, _ = stooq_fill(C_etf, V_etf, ETFS)
     # DXY·^TNX 같은 24시간/장외 종목은 '오늘 진행 중' 시세가 마지막 봉으로 끼어든다.
     # 미국 주식장의 마지막 완결일(SPY 기준) 이후 행은 잘라서, 모든 값을 종가 대 종가로 통일한다.
+    cutoff = pd.Timestamp(SESSION)
     if BENCH in C_etf.columns and not C_etf[BENCH].dropna().empty:
-        cutoff = C_etf[BENCH].dropna().index[-1]
-        C_etf = C_etf.loc[C_etf.index <= cutoff]
-        V_etf = V_etf.loc[V_etf.index <= cutoff]
-        print(f"  마지막 완결 거래일: {cutoff.date()} (이후 미완성 봉 제거)")
+        cutoff = min(cutoff, C_etf[BENCH].dropna().index[-1])
+    C_etf = C_etf.loc[C_etf.index <= cutoff]
+    V_etf = V_etf.loc[V_etf.index <= cutoff]
+    print(f"  확정 거래일 {cutoff.date()} 까지만 사용 (장중 미완성 봉 제외)")
     quotes = quotes_block(C_etf)
     dates, series = series_block(C_etf)
     print(f"  {len(quotes)}개 종목 / 시계열 {len(dates)}일")
@@ -575,6 +614,8 @@ def main():
             print("4) 섹터 분류")
             secmap = build_sector_map(C, C_etf)
 
+        C = C.loc[C.index <= cutoff]
+        V = V.loc[V.index <= cutoff]
         print("5) 브레스 계산")
         breadth, sectors = breadth_block(C, V, BREADTH_DAYS, secmap or None)
         if breadth:
