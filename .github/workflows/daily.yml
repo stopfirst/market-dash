@@ -2,11 +2,23 @@ name: daily-data
 
 on:
   schedule:
-    - cron: "30 22 * * 1-5"    # UTC 22:30 = 한국시간 07:30 (미국장 마감 뒤)
-  workflow_dispatch:           # 필요할 때 손으로도 돌릴 수 있음
+    # 한국시간 05:30 — 서머타임(3~11월) 기간에는 미국장 마감 30분 뒤
+    - cron: "30 20 * * 1-5"
+    # 한국시간 06:30 — 겨울에는 이때가 마감 30분 뒤. 여름엔 이미 최신이라 몇 초 만에 종료된다
+    - cron: "30 21 * * 1-5"
+  workflow_dispatch:
+    inputs:
+      force:
+        description: "최신이어도 다시 계산"
+        type: boolean
+        default: false
 
 permissions:
   contents: write
+
+concurrency:
+  group: daily-data
+  cancel-in-progress: false
 
 jobs:
   build:
@@ -20,15 +32,16 @@ jobs:
           python-version: "3.12"
 
       - name: 패키지 설치
-        run: pip install --quiet yfinance pandas numpy requests
+        run: pip install --quiet yfinance pandas numpy requests lxml html5lib beautifulsoup4
 
       - name: data.json 생성
-        run: python build_data.py --out data.json
+        run: python build_data.py --out data.json ${{ inputs.force && '--force' || '' }}
 
       - name: 커밋
         run: |
           git config user.name  "github-actions"
           git config user.email "actions@github.com"
+          git pull --rebase --autostash || true
           git add data.json
           git diff --staged --quiet || git commit -m "data: $(date -u +%Y-%m-%d)"
           git push
