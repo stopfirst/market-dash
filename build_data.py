@@ -30,8 +30,8 @@ import requests
 
 # ─────────────────────────── 설정 ───────────────────────────
 BENCH = "SPY"
-MACRO = ["SPY", "QQQ", "DIA", "IWM", "^VIX", "^TNX", "DX-Y.NYB"]
-MACRO_ALIAS = {"^VIX": "VIX", "^TNX": "US10Y", "DX-Y.NYB": "DXY"}
+MACRO = ["SPY", "QQQ", "DIA", "IWM", "^VIX", "^TNX", "DX-Y.NYB", "CL=F"]
+MACRO_ALIAS = {"^VIX": "VIX", "^TNX": "US10Y", "DX-Y.NYB": "DXY", "CL=F": "WTI"}
 
 SECTORS = ["XLK","XLC","XLY","XLP","XLE","XLF","XLV","XLI","XLB","XLRE","XLU"]
 THEMES  = ["SMH","IGV","SKYY","GRID","URA","XOP","ITA","ARKX","BOTZ","CIBR",
@@ -43,6 +43,7 @@ ETFS    = sorted(set(MACRO + SECTORS + THEMES))
 VOL_4PCT    = 100_000    # 4% 스캔: 당일 거래량 ≥ 10만주 AND V > V1
 DOLLAR_VOL  = 250_000    # 25%/50%/13% 스캔: 20일 평균 종가×거래량 ≥ $250K
 MIN_C20     = 5.0        # 월간 스캔: 20일 전 종가 ≥ $5
+TICKER_CAP  = 15         # 섹터별 상세에 담을 종목 수 상한
 BREADTH_DAYS = 60        # 매 실행 시 다시 계산할 브레스 일수
 HISTORY_KEEP = 250       # data.json 에 남길 최대 일수
 SERIES_KEEP = 280        # 내보낼 ETF 종가 일수
@@ -189,6 +190,50 @@ def fetch_stockbee() -> dict:
             print(f"  · {name}: 표 {len(tables)}개 중 매칭 없음 | 응답 앞부분: {snip[:140]}")
         except Exception as e:
             print(f"  · {name}: {type(e).__name__} {e}")
+    return {}
+
+
+def fetch_fear_greed() -> dict:
+    """CNN Fear & Greed Index. 실패하면 {} — 화면에서 그 칸만 빠진다."""
+    bua = {"User-Agent": ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                          "(KHTML, like Gecko) Chrome/126.0 Safari/537.36"),
+           "Accept": "application/json, text/plain, */*"}
+    urls = [
+        "https://production.dataviz.cnn.io/index/fearandgreed/graphdata",
+        "https://production.dataviz.cnn.io/index/fearandgreed/current",
+    ]
+    for u in urls:
+        try:
+            r = requests.get(u, headers=bua, timeout=30)
+            if not r.ok:
+                print(f"  · F&G {u.rsplit('/', 1)[-1]}: HTTP {r.status_code}")
+                continue
+            j = r.json()
+            cur = j.get("fear_and_greed") or j
+            score = cur.get("score")
+            if score is None:
+                continue
+            out = {
+                "score": round(float(score), 1),
+                "rating": cur.get("rating"),
+                "prev": (round(float(cur["previous_close"]), 1)
+                         if cur.get("previous_close") is not None else None),
+                "w1": (round(float(cur["previous_1_week"]), 1)
+                       if cur.get("previous_1_week") is not None else None),
+                "m1": (round(float(cur["previous_1_month"]), 1)
+                       if cur.get("previous_1_month") is not None else None),
+            }
+            hist = (j.get("fear_and_greed_historical") or {}).get("data") or []
+            if hist:
+                out["history"] = [
+                    {"d": datetime.fromtimestamp(h["x"] / 1000, timezone.utc).strftime("%Y-%m-%d"),
+                     "v": round(float(h["y"]), 1)}
+                    for h in hist[-60:] if h.get("x") and h.get("y") is not None
+                ]
+            print(f"  · F&G: {out['score']} ({out.get('rating')})")
+            return out
+        except Exception as e:
+            print(f"  · F&G {u.rsplit('/', 1)[-1]}: {type(e).__name__} {e}")
     return {}
 
 
@@ -485,6 +530,21 @@ def breadth_block(C: pd.DataFrame, V: pd.DataFrame, days: int, sector_map=None):
         for tk, sec in sector_map.items():
             groups.setdefault(sec, []).append(tk)
         d_last = C.index[-1]
+        r1_last, mch_last = r1.loc[d_last], mch.loc[d_last]
+
+        def picks(mask_row, cols, val_row, cap=TICKER_CAP):
+            hits = []
+            for t in cols:
+                try:
+                    if bool(mask_row[t]):
+                        v = val_row.get(t)
+                        if v is not None and np.isfinite(v):
+                            hits.append((t, round(float(v), 1)))
+                except (KeyError, TypeError, ValueError):
+                    continue
+            hits.sort(key=lambda x: -abs(x[1]))
+            return [{"t": t, "c": v} for t, v in hits[:cap]]
+
         for sec, cols in groups.items():
             cols = [c for c in cols if c in C.columns]
             if not cols:
@@ -497,6 +557,10 @@ def breadth_block(C: pd.DataFrame, V: pd.DataFrame, days: int, sector_map=None):
                 "u5": int(u_ser.tail(5).sum()),
                 "m25u": int(m25u_mask[cols].sum(axis=1).loc[d_last]),
                 "n": len(cols),
+                # 탭했을 때 보여줄 실제 종목 (상위 몇 개만)
+                "up": picks(up4_mask.loc[d_last], cols, r1_last),
+                "dn": picks(dn4_mask.loc[d_last], cols, r1_last),
+                "mom": picks(m25u_mask.loc[d_last], cols, mch_last),
             })
         sectors.sort(key=lambda r: -r["up4"])
 
@@ -662,8 +726,12 @@ def main():
 
     asof = dates[-1] if dates else prev.get("asof")
 
+    print("7) CNN Fear & Greed")
+    fng = fetch_fear_greed() or prev.get("fng")
+
     out = {
         "asof": asof,
+        "fng": fng,
         "generated": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "universe": (history[-1].get("universe") if history else None) or universe,
         "breadth_source": bsrc or prev.get("breadth_source"),

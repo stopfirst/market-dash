@@ -70,11 +70,9 @@ body{
 /* number strip */
 .strip{display:grid;grid-template-columns:repeat(3,1fr);gap:1px;background:var(--line);
   border:1px solid var(--line);border-radius:var(--r);overflow:hidden}
-.strip .cell:last-child:nth-child(3n+1){grid-column:span 3}
 @media(min-width:560px){
-  .strip{grid-template-columns:repeat(7,1fr)}
-  .strip .cell:last-child:nth-child(3n+1){grid-column:auto}
-  .strip .cell{padding:8px 7px}
+  .strip{grid-template-columns:repeat(8,1fr)}
+  .strip .cell{padding:8px 6px}
 }
 .cell{background:var(--card);padding:8px 9px}
 .cell-k{font-family:var(--mono);font-size:9.5px;letter-spacing:.09em;color:var(--ink-3)}
@@ -118,7 +116,8 @@ table.mm tr.today td.d{background:#FAFBFC}
 .flag.neut{color:var(--ink-2);border-color:var(--line);background:#F8F9FB}
 
 /* gauges */
-.gauges{display:grid;grid-template-columns:repeat(3,1fr);gap:7px;margin-top:9px}
+.gauges{display:grid;grid-template-columns:repeat(2,1fr);gap:7px;margin-top:9px}
+@media(min-width:560px){.gauges{grid-template-columns:repeat(4,1fr)}}
 .gauge{border:1px solid var(--line);border-radius:var(--r);background:var(--card);padding:9px 10px}
 .gauge-k{font-family:var(--mono);font-size:9.5px;letter-spacing:.08em;color:var(--ink-3)}
 .gauge-v{font-family:var(--mono);font-size:19px;font-weight:700;margin-top:1px;font-variant-numeric:tabular-nums}
@@ -199,6 +198,19 @@ label.fl{display:block;font-family:var(--mono);font-size:10px;letter-spacing:.09
   font-family:var(--mono);font-size:10px;color:var(--ink-3);text-align:center}
 .sbhead,.sbrow{display:grid;grid-template-columns:minmax(64px,1fr) 2fr 42px 42px 46px;gap:8px;align-items:center;padding:6px 11px;border-bottom:1px solid var(--line-soft);font-size:12px}
 .sbrow:last-child{border-bottom:0}
+.sbrow.tap{cursor:pointer}
+.sbrow.tap:active{background:var(--steel-soft)}
+.chev{color:var(--ink-3);font-size:11px}
+.tkgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(96px,1fr));gap:6px;margin-top:7px}
+.tk{display:flex;align-items:baseline;gap:6px;border:1px solid var(--line);border-radius:7px;
+  padding:6px 8px;background:var(--card);cursor:pointer;font-family:var(--mono);font-size:12px}
+.tk:active{background:var(--steel-soft)}
+.tk b{font-weight:700}
+.tk span{margin-left:auto;font-size:11px;font-variant-numeric:tabular-nums}
+.tkhead{display:flex;align-items:center;gap:7px;margin-top:14px}
+.tkhead h4{margin:0;font-size:13px;font-weight:650}
+.tkhead .cnt{font-family:var(--mono);font-size:11px;color:var(--ink-3)}
+.tkhead button{margin-left:auto}
 .sbhead{font-family:var(--mono);font-size:9px;color:var(--ink-3);letter-spacing:.07em;border-bottom:1px solid var(--line)}
 .sb-n{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .sb-bar{height:6px;background:var(--line-soft);border-radius:3px;overflow:hidden}
@@ -287,7 +299,7 @@ label.fl{display:block;font-family:var(--mono);font-size:10px;letter-spacing:.09
     <div class="rows" id="rowsKR"></div>
   </div>
 
-  <div class="footer" id="footer">SECTOR + BREADTH · v2.2</div>
+  <div class="footer" id="footer">SECTOR + BREADTH · v2.4</div>
 </div>
 
 <div class="sheet" id="sheet">
@@ -361,7 +373,7 @@ const KR_SECTORS=[
   {s:"228790",k:"화장품",g:"TIGER"},{s:"091170",k:"은행",g:"KODEX"},
   {s:"091180",k:"자동차",g:"KODEX"}
 ];
-const MACRO=["SPY","QQQ","DIA","IWM","VIX","US10Y","DXY"];
+const MACRO=["SPY","QQQ","DIA","IWM","VIX","US10Y","DXY","WTI"];
 const PERIODS=[{k:"d1",t:"1D"},{k:"w1",t:"1W"},{k:"m1",t:"1M"},{k:"m3",t:"3M"},{k:"m6",t:"6M"},{k:"ytd",t:"YTD"}];
 
 /* Market Monitor 컬럼 정의 (Stockbee) */
@@ -431,7 +443,7 @@ function pctAt(c,n,off){ const L=c.length-1-(off||0); if(L<n||L<0)return null;
 
 /* ── 상태 ── */
 let CFG=Object.assign({},DEFAULT_CFG);
-let DATA={ts:null,asof:null,src:{},series:{},q:{},breadth:[],sectors:[],universe:null,errs:[]};
+let DATA={ts:null,asof:null,src:{},series:{},q:{},breadth:[],sectors:[],fng:null,universe:null,errs:[]};
 let SNAP={};
 
 /* ════ 데이터 소스 ════ */
@@ -454,6 +466,7 @@ async function fetchFeed(url){
   if(j.breadth?.history?.length) DATA.breadth=j.breadth.history;
   else if(Array.isArray(j.breadth)) DATA.breadth=j.breadth;
   if(Array.isArray(j.sectors)&&j.sectors.length) DATA.sectors=j.sectors;
+  if(j.fng&&isNum(j.fng.score)) DATA.fng=j.fng;
   if(Array.isArray(j.dates)&&j.series){          // 공통 날짜축 + 종가 → 꼬리·순위변화 재료
     Object.keys(j.series).forEach(t=>{
       const arr=j.series[t]; if(!Array.isArray(arr)) return;
@@ -625,7 +638,7 @@ function renderTop(){
 function renderStrip(){
   $("#strip").innerHTML=MACRO.map(k=>{
     const o=DATA.q[k]||{};
-    const dec=k==="VIX"||k==="US10Y"?2:(o.px>1000?0:2);
+    const dec=(k==="VIX"||k==="US10Y"||k==="WTI")?2:(o.px>1000?0:2);
     return `<div class="cell"><div class="cell-k">${k}</div>
       <div class="cell-v">${isNum(o.px)?fmtN(o.px,dec):"—"}</div>
       <div class="cell-d ${cls(o.d1)}">${fmtP(o.d1)}</div></div>`;
@@ -692,6 +705,9 @@ function renderMM(){
   if(isNum(t.q25u)&&t.q25u<300) F.push(["bull","분기 25%↑ "+fmtI(t.q25u)+" — 300 미만"]);
   if(isNum(t.mco)){ if(t.mco<-70)F.push(["bull","맥클렐란 "+t.mco.toFixed(0)+" — 매도 극단"]);
     else if(t.mco>70)F.push(["warn","맥클렐란 +"+t.mco.toFixed(0)+" — 과열"]); }
+  const fg=DATA.fng?.score;
+  if(isNum(fg)){ if(fg<25)F.push(["bull","F&G "+fg.toFixed(0)+" — 극단적 공포"]);
+    else if(fg>75)F.push(["warn","F&G "+fg.toFixed(0)+" — 극단적 탐욕"]); }
   if(!F.length) F.push(["neut","극단 없음 — 브레스는 이럴 때 쓸모가 적습니다"]);
   $("#mmFlags").innerHTML=F.map(([c,t])=>`<span class="flag ${c}">${t}</span>`).join("");
 
@@ -711,10 +727,23 @@ function renderMM(){
       <div class="gbar"><i style="width:${pct}%;background:${col}"></i></div>
       <div class="gnote">${note}</div></div>`;
   };
+  const FG=DATA.fng||{};
+  const fngCard=(()=>{
+    if(!isNum(FG.score)) return "";
+    const v=FG.score, pct=clamp(v,0,100);
+    const col=v<25?"var(--dn)":v>75?"var(--up)":"var(--steel)";
+    const ko=v<25?"극단적 공포":v<45?"공포":v<55?"중립":v<75?"탐욕":"극단적 탐욕";
+    const prev=isNum(FG.prev)?` · 전일 ${FG.prev.toFixed(0)}`:"";
+    return `<div class="gauge"><div class="gauge-k">F&amp;G</div>
+      <div class="gauge-v" style="color:${col}">${v.toFixed(0)}</div>
+      <div class="gbar"><i style="width:${pct}%;background:${col}"></i></div>
+      <div class="gnote">${ko}${prev}</div></div>`;
+  })();
   $("#gauges").innerHTML=
     g("t2108","T2108",t.t2108,0,100,"40일선 위 %")+
     g("r10","10일비",t.r10,0,3,"4%↑ / 4%↓")+
-    g("a200","%>200MA",t.a200,0,100,"장기 추세 폭");
+    g("a200","%>200MA",t.a200,0,100,"장기 추세 폭")+
+    fngCard;
 
   /* 스파크 */
   const spLine=(label,vals,color,dec,zero)=>{
@@ -771,7 +800,9 @@ function renderMM(){
   const mcsA=H60.map(r=>isNum(r.mcs)?r.mcs:null);
   const adA=H60.some(r=>isNum(r.adv)&&isNum(r.dec))?cum(r=>(isNum(r.adv)&&isNum(r.dec))?r.adv-r.dec:null):[];
   const hlA=cum(r=>(isNum(r.nh)&&isNum(r.nl))?r.nh-r.nl:null);
+  const fgA=(DATA.fng?.history||[]).slice(-60).map(x=>isNum(x.v)?x.v:null);
   const aux=
+    (fgA.length>=3?spLine("Fear &amp; Greed",fgA,"#B4740E",0):"")+
     spLine("맥클렐란 Osc",mcoA,"#6B4E8E",1,true)+
     spLine("서메이션",mcsA,"#6B4E8E",0)+
     spLine("A/D 누적",adA,"#33506E",0)+
@@ -796,7 +827,8 @@ function renderSecBreadth(){
     arr.map(o=>{
       const w=clamp((o.up4||0)/mx*100,0,100);
       const nm=(US_SECTORS.find(x=>x.s===o.s)?.k)||SEC_KO[o.s]||o.s;
-      return `<div class="sbrow"><div class="sb-n">${nm}</div>
+      const has=(o.up?.length||o.dn?.length||o.mom?.length)>0;
+      return `<div class="sbrow${has?" tap":""}"${has?` data-sec="${o.s}"`:""}><div class="sb-n">${nm}${has?' <span class="chev">›</span>':''}</div>
         <div class="sb-bar"><i style="width:${w}%"></i></div>
         <div class="sb-v ${o.up4?"up":"dim"}">${o.up4??"—"}</div>
         <div class="sb-v ${o.dn4?"dn":"dim"}">${o.dn4??"—"}</div>
@@ -924,7 +956,7 @@ function renderAll(){
   renderCryptoNote(); renderQuad();
   $("#krBlock").hidden=!CFG.showKR;
   if(CFG.showKR) renderRows($("#rowsKR"),"kr");
-  $("#footer").textContent=`SECTOR + BREADTH · v2.2 · 저장:${Store.mode}`;
+  $("#footer").textContent=`SECTOR + BREADTH · v2.4 · 저장:${Store.mode}`;
 }
 
 /* ════ 시트 ════ */
@@ -1060,6 +1092,34 @@ function sheetTicker(t){
     </div>`);
 }
 
+function sheetSector(sec){
+  const o=(DATA.sectors||[]).find(x=>x.s===sec); if(!o) return;
+  const nm=(US_SECTORS.find(x=>x.s===sec)?.k)||SEC_KO[sec]||sec;
+  const block=(title,list,cnt,cls,note)=>{
+    if(!list?.length) return "";
+    const shown=list.length<cnt?` (상위 ${list.length}개)`:"";
+    return `<div class="tkhead"><h4>${title}</h4><span class="cnt">${cnt}종목${shown}</span>
+      <button class="btn sm" data-copy="${list.map(x=>x.t).join(" ")}">전체 복사</button></div>
+      <div class="tkgrid">${list.map(x=>
+        `<div class="tk" data-tk="${x.t}"><b>${x.t}</b><span class="${cls}">${x.c>0?"+":""}${x.c}%</span></div>`
+      ).join("")}</div>`;
+  };
+  openSheet(`${nm} · ${sec}`,
+    `<div class="xs dim">기준 ${DATA.asof||"—"} · 이 섹터로 분류된 종목 ${o.n??"—"}개</div>`+
+    block("오늘 4% 이상 상승", o.up, o.up4, "up")+
+    block("한 달 25% 이상 상승", o.mom, o.m25u, "up")+
+    block("오늘 4% 이상 하락", o.dn, o.dn4, "dn")+
+    `<div class="xs dim" style="margin-top:14px;line-height:1.6">
+      티커를 누르면 복사됩니다. 여기 나온 종목은 <b>스캔 결과일 뿐</b>이고 매수 후보가 아닙니다 —
+      진입 판단은 늘 하던 도구에서 하세요.</div>`,
+    ()=>{
+      $("#sheetBody").addEventListener("click",e=>{
+        const c=e.target.closest("[data-copy]"); if(c){ copy(c.dataset.copy); return; }
+        const t=e.target.closest("[data-tk]"); if(t) copy(t.dataset.tk);
+      });
+    });
+}
+
 /* ════ 이벤트 ════ */
 function bind(){
   $("#btnRefresh").onclick=refreshAll;
@@ -1085,6 +1145,8 @@ function bind(){
       });
       setTimeout(()=>$$("#quadSvg .qtail").forEach(g=>g.style.opacity=""),2600);
       sheetTicker(q.dataset.qt); return; }
+    const sb=e.target.closest(".sbrow[data-sec]");
+    if(sb){ sheetSector(sb.dataset.sec); return; }
     const el=e.target.closest(".tile[data-t]")||e.target.closest(".row[data-t]");
     if(el) sheetTicker(el.dataset.t); });
   $("#obFeed").onclick=sheetFeed; $("#obTry").onclick=refreshAll; $("#obPaste").onclick=sheetPaste;
