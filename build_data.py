@@ -43,7 +43,7 @@ ETFS    = sorted(set(MACRO + SECTORS + THEMES))
 VOL_4PCT    = 100_000    # 4% 스캔: 당일 거래량 ≥ 10만주 AND V > V1
 DOLLAR_VOL  = 250_000    # 25%/50%/13% 스캔: 20일 평균 종가×거래량 ≥ $250K
 MIN_C20     = 5.0        # 월간 스캔: 20일 전 종가 ≥ $5
-TICKER_CAP  = 15         # 섹터별 상세에 담을 종목 수 상한
+TICKER_CAP  = 30         # 섹터별 상세에 담을 종목 수 상한
 BREADTH_DAYS = 60        # 매 실행 시 다시 계산할 브레스 일수
 HISTORY_KEEP = 250       # data.json 에 남길 최대 일수
 SERIES_KEEP = 280        # 내보낼 ETF 종가 일수
@@ -235,6 +235,60 @@ def fetch_fear_greed() -> dict:
         except Exception as e:
             print(f"  · F&G {u.rsplit('/', 1)[-1]}: {type(e).__name__} {e}")
     return {}
+
+
+# ─────────────────────── 섹터 분류 ───────────────────────
+# 나스닥 스크리너가 상장 전 종목의 섹터를 준다. 한 번의 요청으로 끝난다.
+NASDAQ_SECTOR = {
+    "health care": "XLV", "healthcare": "XLV",
+    "technology": "XLK", "computer and technology": "XLK",
+    "finance": "XLF", "financials": "XLF", "financial": "XLF",
+    "energy": "XLE", "oils/energy": "XLE",
+    "consumer discretionary": "XLY", "consumer services": "XLY",
+    "retail/wholesale": "XLY", "auto/tires/trucks": "XLY",
+    "consumer staples": "XLP", "consumer non-durables": "XLP",
+    "consumer durables": "XLY",
+    "industrials": "XLI", "industrial products": "XLI",
+    "capital goods": "XLI", "transportation": "XLI", "aerospace": "XLI",
+    "basic materials": "XLB", "basic industries": "XLB",
+    "real estate": "XLRE",
+    "utilities": "XLU", "public utilities": "XLU",
+    "telecommunications": "XLC", "communication services": "XLC",
+    "media": "XLC",
+}
+
+
+def fetch_listed_sectors() -> dict:
+    """나스닥 스크리너에서 {티커: SPDR섹터} 를 받는다. 실패하면 {}."""
+    bua = {"User-Agent": ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                          "(KHTML, like Gecko) Chrome/126.0 Safari/537.36"),
+           "Accept": "application/json, text/plain, */*"}
+    url = ("https://api.nasdaq.com/api/screener/stocks"
+           "?tableonly=true&limit=25000&download=true")
+    try:
+        r = requests.get(url, headers=bua, timeout=60)
+        if not r.ok:
+            print(f"  ! 섹터 목록: HTTP {r.status_code}")
+            return {}
+        rows = ((r.json().get("data") or {}).get("rows")) or []
+        out, unknown = {}, set()
+        for row in rows:
+            sym = str(row.get("symbol", "")).strip().upper()
+            sec = str(row.get("sector", "")).strip().lower()
+            if not sym or not sec:
+                continue
+            spdr = NASDAQ_SECTOR.get(sec)
+            if spdr:
+                out[sym] = spdr
+            else:
+                unknown.add(sec)
+        if unknown:
+            print(f"  · 매핑 못한 섹터명: {sorted(unknown)[:6]}")
+        print(f"  거래소 섹터 {len(out)}종목")
+        return out
+    except Exception as e:
+        print(f"  ! 섹터 목록: {type(e).__name__} {e}")
+        return {}
 
 
 # ─────────────────────── 유니버스 ───────────────────────
@@ -619,6 +673,38 @@ def build_sector_map(C_uni: pd.DataFrame, C_etf: pd.DataFrame) -> dict:
     return out
 
 
+def diagnose(tk: str):
+    """한 종목이 스캔에 왜 걸리는지/안 걸리는지 관문별로 보여준다."""
+    print(f"=== {tk} 진단 (기준 거래일 {SESSION}) ===")
+    C, V = download([tk], LOOKBACK_DAYS)
+    if tk not in C.columns or C[tk].dropna().empty:
+        print("  ✗ 시세를 못 받았습니다. 티커가 맞는지, 상장폐지·심볼변경은 아닌지 확인하세요.")
+        return
+    C = C.loc[C.index <= pd.Timestamp(SESSION)]
+    V = V.reindex(index=C.index)
+    c, v = C[tk].dropna(), V[tk]
+    d = c.index[-1]
+    px, prev = float(c.iloc[-1]), float(c.iloc[-2])
+    ch = (px / prev - 1) * 100
+    vol = float(v.get(d, float("nan")))
+    vol1 = float(v.get(c.index[-2], float("nan")))
+    print(f"  최종 거래일 {d.date()} · 종가 {px:.2f} · 전일대비 {ch:+.2f}%")
+    print(f"  거래량 {vol:,.0f} (전일 {vol1:,.0f})")
+
+    ok = lambda b: "OK " if b else "✗  "
+    print(f"  {ok(abs(ch) >= 4)}① 4% 이상 변동          : {ch:+.2f}%")
+    print(f"  {ok(vol >= VOL_4PCT)}② 당일 거래량 10만주 이상 : {vol:,.0f}")
+    print(f"  {ok(vol > vol1)}③ 전일보다 거래량 증가    : {'예' if vol > vol1 else '아니오'}")
+    dv = float(c.tail(20).mean() * v.tail(20).mean())
+    print(f"  {ok(dv >= DOLLAR_VOL)}④ 20일 평균 달러볼륨 25만$ : ${dv:,.0f}  (분기·월간 스캔용)")
+
+    sec = fetch_listed_sectors().get(tk)
+    print(f"  {ok(bool(sec))}⑤ 섹터 분류              : {sec or '미분류 — 어느 섹터 목록에도 안 나옵니다'}")
+    if str(d.date()) != str(SESSION):
+        print(f"  ! 이 종목의 최종 거래일({d.date()})이 기준일({SESSION})과 다릅니다.")
+    print("  ①②③ 을 모두 통과해야 '오늘 4% 돌파'에 들어갑니다.")
+
+
 # ─────────────────────── 메인 ───────────────────────
 def main():
     ap = argparse.ArgumentParser()
@@ -627,11 +713,16 @@ def main():
     ap.add_argument("--no-sector", action="store_true")
     ap.add_argument("--no-stockbee", action="store_true", help="원본 시트를 쓰지 않고 자체 계산만")
     ap.add_argument("--force", action="store_true", help="최신이어도 다시 계산")
+    ap.add_argument("--why", metavar="TICKER",
+                    help="특정 종목이 왜 안 잡히는지 진단하고 종료")
     ap.add_argument("--out", default="data.json")
     args = ap.parse_args()
 
     global SESSION
     SESSION = last_session_date()
+    if args.why:
+        diagnose(args.why.strip().upper())
+        return
     sess_str = SESSION.strftime("%Y-%m-%d")
 
     prev_peek = {}
