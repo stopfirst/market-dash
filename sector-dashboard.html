@@ -299,7 +299,7 @@ label.fl{display:block;font-family:var(--mono);font-size:10px;letter-spacing:.09
     <div class="rows" id="rowsKR"></div>
   </div>
 
-  <div class="footer" id="footer">SECTOR + BREADTH · v2.4</div>
+  <div class="footer" id="footer">SECTOR + BREADTH · v2.5</div>
 </div>
 
 <div class="sheet" id="sheet">
@@ -956,7 +956,7 @@ function renderAll(){
   renderCryptoNote(); renderQuad();
   $("#krBlock").hidden=!CFG.showKR;
   if(CFG.showKR) renderRows($("#rowsKR"),"kr");
-  $("#footer").textContent=`SECTOR + BREADTH · v2.4 · 저장:${Store.mode}`;
+  $("#footer").textContent=`SECTOR + BREADTH · v2.5 · 저장:${Store.mode}`;
 }
 
 /* ════ 시트 ════ */
@@ -1095,14 +1095,17 @@ function sheetTicker(t){
 function sheetSector(sec){
   const o=(DATA.sectors||[]).find(x=>x.s===sec); if(!o) return;
   const nm=(US_SECTORS.find(x=>x.s===sec)?.k)||SEC_KO[sec]||sec;
-  const block=(title,list,cnt,cls,note)=>{
+  const SHOW=30;
+  const block=(title,list,cnt,cls)=>{
     if(!list?.length) return "";
-    const shown=list.length<cnt?` (상위 ${list.length}개)`:"";
+    const chip=x=>`<div class="tk" data-tk="${x.t}"><b>${x.t}</b><span class="${cls}">${x.c>0?"+":""}${x.c}%</span></div>`;
+    const head=list.slice(0,SHOW), rest=list.slice(SHOW);
+    const shown=list.length<cnt?` (수집분 ${list.length}개)`:"";
     return `<div class="tkhead"><h4>${title}</h4><span class="cnt">${cnt}종목${shown}</span>
       <button class="btn sm" data-copy="${list.map(x=>x.t).join(" ")}">전체 복사</button></div>
-      <div class="tkgrid">${list.map(x=>
-        `<div class="tk" data-tk="${x.t}"><b>${x.t}</b><span class="${cls}">${x.c>0?"+":""}${x.c}%</span></div>`
-      ).join("")}</div>`;
+      <div class="tkgrid">${head.map(chip).join("")}</div>`+
+      (rest.length?`<div class="tkgrid" data-rest hidden>${rest.map(chip).join("")}</div>
+        <button class="btn sm full" data-more style="margin-top:7px">나머지 ${rest.length}개 더 보기</button>`:"");
   };
   openSheet(`${nm} · ${sec}`,
     `<div class="xs dim">기준 ${DATA.asof||"—"} · 이 섹터로 분류된 종목 ${o.n??"—"}개</div>`+
@@ -1114,6 +1117,10 @@ function sheetSector(sec){
       진입 판단은 늘 하던 도구에서 하세요.</div>`,
     ()=>{
       $("#sheetBody").addEventListener("click",e=>{
+        const mo=e.target.closest("[data-more]");
+        if(mo){ const g=mo.previousElementSibling;
+          if(g&&g.hasAttribute("data-rest")) g.hidden=false;
+          mo.remove(); return; }
         const c=e.target.closest("[data-copy]"); if(c){ copy(c.dataset.copy); return; }
         const t=e.target.closest("[data-tk]"); if(t) copy(t.dataset.tk);
       });
