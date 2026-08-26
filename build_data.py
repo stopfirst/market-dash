@@ -301,7 +301,9 @@ def load_universe(limit: int | None) -> list[str]:
     ):
         try:
             txt = requests.get(url, headers=UA, timeout=40).text
-            df = pd.read_csv(io.StringIO(txt), sep="|")
+            # dtype=str, keep_default_na=False 가 없으면 티커 "NA"·"NAN" 이 실수로 바뀐다
+            df = pd.read_csv(io.StringIO(txt), sep="|", dtype=str,
+                             keep_default_na=False, na_values=[])
             df = df[~df.iloc[:, 0].astype(str).str.startswith("File Creation")]
             sym_col = "Symbol" if "Symbol" in df.columns else "ACT Symbol"
             if "Test Issue" in df.columns:
@@ -309,15 +311,20 @@ def load_universe(limit: int | None) -> list[str]:
             if etf_col in df.columns:
                 df = df[df[etf_col] != "Y"]
             for s in df[sym_col].astype(str):
-                s = s.strip()
+                s = s.strip().upper()
                 # 워런트/유닛/우선주/권리 제외
                 if not s or len(s) > 5 or any(ch in s for ch in ".$+-^"):
                     continue
                 if len(s) == 5 and s[-1] in "WRUPQZ":
                     continue
                 out.add(s)
+            print(f"  · {url.rsplit('/', 1)[-1]}: {len(df)}행")
         except Exception as e:
-            print(f"  ! 유니버스 {url} 실패: {e}", file=sys.stderr)
+            print(f"  ! 유니버스 {url.rsplit('/', 1)[-1]} 실패: {type(e).__name__} {e}")
+    if not out:
+        print("  ! 유니버스를 하나도 받지 못했습니다 — 브레스를 건너뜁니다.")
+    elif len(out) < 5000:
+        print(f"  ! 유니버스가 {len(out)}개뿐입니다. 보통 6,000개 이상이라 한쪽 목록이 실패했을 수 있습니다.")
     syms = sorted(out)
     if limit:
         syms = syms[:limit]
@@ -360,18 +367,28 @@ def download(tickers: list[str], period_days: int) -> tuple[pd.DataFrame, pd.Dat
     C = C.loc[:, ~C.columns.duplicated()].sort_index()
     V = V.loc[:, ~V.columns.duplicated()].sort_index()
 
-    # 빠졌거나 빈 티커는 한 번 더 시도
-    missing = [t for t in tickers if t not in C.columns or C[t].dropna().empty]
-    if missing and len(missing) < len(tickers):
-        try:
-            time.sleep(3)
-            C2, V2 = _retry_batch(missing, period_days)
-            for t in C2.columns:
-                if t not in C.columns or C[t].dropna().empty:
-                    C[t] = C2[t]; V[t] = V2.get(t)
-            print(f"  재시도로 {len([t for t in missing if t in C.columns and not C[t].dropna().empty])}/{len(missing)}개 보충")
-        except Exception:
-            pass
+    # 빠졌거나 빈 티커는 소량 배치로 두 차례 더 시도한다
+    for attempt in range(2):
+        missing = [t for t in tickers if t not in C.columns or C[t].dropna().empty]
+        if not missing or len(missing) == len(tickers):
+            break
+        got = 0
+        for i in range(0, len(missing), 50):
+            chunk = missing[i:i + 50]
+            try:
+                time.sleep(1.5)
+                C2, V2 = _retry_batch(chunk, period_days)
+                for t in C2.columns:
+                    if t not in C.columns or C[t].dropna().empty:
+                        C[t] = C2[t]
+                        if t in V2.columns:
+                            V[t] = V2[t]
+                        got += 1
+            except Exception:
+                continue
+        print(f"  재시도{attempt + 1}: {got}/{len(missing)}개 보충")
+        if got == 0:
+            break
     return C, V
 
 
@@ -763,11 +780,22 @@ def main():
         if C.empty or C.shape[1] < len(syms) * 0.3:
             print("  ! yfinance 수집이 부실하다 — Stooq 로 보충", file=sys.stderr)
             C, V, _ = stooq_fill(C, V, syms)
-        print(f"  받은 종목 {C.shape[1]}개 / 거래일 {C.shape[0]}일")
+        good = int((C.notna().sum(axis=0) > 20).sum())
+        print(f"  받은 종목 {good}/{len(syms)}개 (유효 시세 기준) / 거래일 {C.shape[0]}일")
+        if good < len(syms) * 0.7:
+            print(f"  ! 수집률 {good / max(len(syms), 1):.0%} — 낮습니다. 브레스 카운트가 실제보다 작게 나옵니다.")
 
         if not args.no_sector:
             print("4) 섹터 분류")
-            secmap = build_sector_map(C, C_etf)
+            secmap = fetch_listed_sectors()
+            secmap = {k: v for k, v in secmap.items() if k in C.columns}
+            listed_n = len(secmap)
+            missing = [t for t in C.columns if t not in secmap]
+            if missing:                 # 거래소 목록에 없는 종목만 상관법으로 보충
+                corr = build_sector_map(C[missing], C_etf)
+                secmap.update(corr)
+                print(f"  거래소 {listed_n}종목 + 상관 보충 {len(corr)}종목 "
+                      f"= {len(secmap)}종목 (미분류 {C.shape[1] - len(secmap)})")
 
         C = C.loc[C.index <= cutoff]
         V = V.loc[V.index <= cutoff]
