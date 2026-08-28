@@ -1,47 +1,43 @@
 name: daily-data
-
+ 
 on:
   schedule:
-    # ── 여름(서머타임, 3~11월): 미국장 마감 = 한국 05:00 ──
-    - cron: "10 20 * * 1-5"   # 한국 05:10 — 마감 +10분. 벤더 종가가 늦으면 헛돌고 다음 슬롯이 받는다
-    - cron: "40 20 * * 1-5"   # 한국 05:40 — 사실상 본 실행
-    - cron: "10 21 * * 1-5"   # 한국 06:10 — 재시도
-    - cron: "40 21 * * 1-5"   # 한국 06:40 — 재시도
-    # ── 겨울(11~3월): 마감 = 한국 06:00 이라 위 슬롯 대부분이 장중 → 자동으로 건너뛴다 ──
-    - cron: "10 22 * * 1-5"   # 한국 07:10 — 겨울 본 실행 / 여름 예비
-    - cron: "40 22 * * 1-5"   # 한국 07:40 — 예비
-    - cron: "40 23 * * 1-5"   # 한국 08:40 — 마지막 예비
+    # 슬롯을 3개로 줄였다. GitHub 예약은 밀리거나 버려지는 일이 잦아
+    # 재시도용으로 간격을 넉넉히 둔다. (여름 기준 한국시간)
+    - cron: "40 20 * * 1-5"   # 05:40 — 마감 +40분, 본 실행
+    - cron: "40 21 * * 1-5"   # 06:40 — 재시도 / 겨울 본 실행
+    - cron: "40 22 * * 1-5"   # 07:40 — 마지막 예비
   workflow_dispatch:
     inputs:
       force:
         description: "최신이어도 다시 계산"
         type: boolean
         default: false
-
+ 
 permissions:
   contents: write
-
+ 
 concurrency:
   group: daily-data
   cancel-in-progress: false
-
+ 
 jobs:
   build:
     runs-on: ubuntu-latest
     timeout-minutes: 50
     steps:
       - uses: actions/checkout@v4
-
+ 
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-
+ 
       - name: 패키지 설치
         run: pip install --quiet yfinance pandas numpy requests lxml html5lib beautifulsoup4
-
+ 
       - name: data.json 생성
         run: python build_data.py --out data.json ${{ inputs.force && '--force' || '' }}
-
+ 
       - name: 커밋
         run: |
           git config user.name  "github-actions"
