@@ -289,9 +289,10 @@ label.fl{display:block;font-family:var(--mono);font-size:10px;letter-spacing:.09
   <div class="xs dim" id="cryptoNote" style="margin-top:6px"></div>
 
   <div class="eyebrow" style="margin:19px 0 0">로테이션 사분면</div>
+  <div class="seg" id="segQuad" style="margin-top:6px"></div>
   <div class="quad">
     <div id="quadSvg"></div>
-    <div class="qcap">가로 3M · 세로 1W — SPY 대비 초과수익률(비율식, %) · 회색 꼬리는 최근 5일 경로 · 점을 누르면 상세</div>
+    <div class="qcap">가로 3M · 세로 1W — SPY 대비 초과수익률(%) · 꼬리는 최근 5일 경로 · 점을 누르면 상세 · 축은 85분위 기준이라 바깥쪽 극단값은 압축되어 표시됩니다</div>
   </div>
 
   <div id="krBlock" hidden>
@@ -299,7 +300,7 @@ label.fl{display:block;font-family:var(--mono);font-size:10px;letter-spacing:.09
     <div class="rows" id="rowsKR"></div>
   </div>
 
-  <div class="footer" id="footer">SECTOR + BREADTH · v2.5</div>
+  <div class="footer" id="footer">SECTOR + BREADTH · v2.6</div>
 </div>
 
 <div class="sheet" id="sheet">
@@ -404,7 +405,7 @@ const MM_COLS=[
 
 const DEFAULT_CFG={
   feedUrl:"", bench:"SPY", period:"m1", mode:"abs",
-  showKR:false, autoFetch:true, mmRows:12,
+  showKR:false, autoFetch:true, mmRows:12, quadGroup:"sector",
   tickersUS:null, tickersTH:null
 };
 
@@ -837,6 +838,11 @@ function renderSecBreadth(){
 }
 
 /* ── 섹터 ── */
+function renderQuadSeg(){
+  const opt=[["sector","섹터 11"],["theme","테마 19"],["all","전체 30"]];
+  $("#segQuad").innerHTML=opt.map(([k,t])=>
+    `<button data-q="${k}" aria-pressed="${CFG.quadGroup===k}">${t}</button>`).join("");
+}
 function renderSegs(){
   $("#segPeriod").innerHTML=PERIODS.map(p=>`<button data-p="${p.k}" aria-pressed="${CFG.period===p.k}">${p.t}</button>`).join("");
   $("#segMode").innerHTML=`<button data-m="abs" aria-pressed="${CFG.mode==="abs"}">절대 수익률</button>
@@ -882,7 +888,8 @@ function renderCryptoNote(){
   } else $("#cryptoNote").textContent="";
 }
 function renderQuad(){
-  const src=[...ALL().us,...ALL().th];
+  const A=ALL();
+  const src=CFG.quadGroup==="sector"?A.us:CFG.quadGroup==="theme"?A.th:[...A.us,...A.th];
   const pts=src.map(t=>{const o=DATA.q[t]; if(!o)return null;
     const x=isNum(o.rs_m3)?o.rs_m3:o.rs_m1, y=o.rs_w1;
     if(!(isNum(x)&&isNum(y))) return null;
@@ -891,11 +898,18 @@ function renderQuad(){
   }).filter(Boolean);
   const W=380,Hh=340,P=30;
   if(!pts.length){ $("#quadSvg").innerHTML=`<div class="xs dim" style="padding:24px 0;text-align:center">상대강도 데이터가 필요합니다</div>`; return; }
+  // 축 기준: 최대값이 아니라 85분위로 잡고, 그 밖은 로그로 접는다.
+  // 이렇게 해야 WGMI 같은 극단값 하나 때문에 나머지가 원점에 뭉치지 않는다.
+  const q85=arr=>{ const a=arr.map(Math.abs).sort((m,n)=>m-n);
+    return a.length?Math.max(a[Math.floor(a.length*0.85)],1e-6):1; };
   const xs=pts.flatMap(p=>[p.x,...p.tail.map(q=>q[0])]);
   const ys=pts.flatMap(p=>[p.y,...p.tail.map(q=>q[1])]);
-  const mx=Math.max(...xs.map(Math.abs),1)*1.18, my=Math.max(...ys.map(Math.abs),1)*1.18;
-  const sx=v=>P+(clamp(v,-mx,mx)/mx/2+.5)*(W-2*P);
-  const sy=v=>(Hh-P)-(clamp(v,-my,my)/my/2+.5)*(Hh-2*P);
+  const bx=Math.max(q85(xs),1)*1.05, by=Math.max(q85(ys),1)*1.05;
+  const squash=(v,b)=>{ const a=Math.abs(v)/b;
+    const u=a<=1?a:1+Math.log10(1+(a-1)*3)/1.6;     // 기준 밖은 완만하게
+    return Math.sign(v)*Math.min(u,1.55)/1.55; };    // −1~1 로 정규화
+  const sx=v=>P+(squash(v,bx)/2+.5)*(W-2*P);
+  const sy=v=>(Hh-P)-(squash(v,by)/2+.5)*(Hh-2*P);
   const qcol=(x,y)=> x>=0?(y>=0?"#157A4F":"#B4740E"):(y>=0?"#33506E":"#C0362C");
 
   const tails=pts.map(p=>{
@@ -911,22 +925,38 @@ function renderQuad(){
       ${dots}</g>`;
   }).join("");
 
-  // 라벨 충돌 회피
-  const labs=pts.map(p=>({p,lx:sx(p.x)+6.5,ly:sy(p.y)+3.4}));
-  labs.sort((a,b)=>a.ly-b.ly||a.lx-b.lx);
-  for(let i=1;i<labs.length;i++)
-    for(let j=Math.max(0,i-6);j<i;j++)
-      if(Math.abs(labs[i].lx-labs[j].lx)<44 && Math.abs(labs[i].ly-labs[j].ly)<9.5)
-        labs[i].ly=labs[j].ly+9.5;
+  // 라벨: 점에서 먼 것부터 자리를 잡고, 8방향 후보 중 안 겹치는 곳에 놓는다.
+  // 끝내 자리가 없으면 라벨을 생략한다 — 겹쳐 읽히는 것보다 낫고, 점은 탭하면 이름이 나온다.
+  const CW=5.4, CH=9;                                   // 글자 폭·높이 근사
+  const placed=[];                                       // 이미 놓인 라벨 상자
+  const hit=(a,b)=>!(a.x2<b.x1||b.x2<a.x1||a.y2<b.y1||b.y2<a.y1);
+  const cand=[[7,3.2],[-7,3.2],[0,-7],[0,11],[7,-6],[-7,-6],[7,11],[-7,11]];
+  const centre=pts.reduce((acc,p)=>({x:acc.x+sx(p.x)/pts.length,y:acc.y+sy(p.y)/pts.length}),{x:0,y:0});
+  const order=pts.map(p=>({p,cx:sx(p.x),cy:sy(p.y)}))
+    .sort((a,b)=>Math.hypot(b.cx-centre.x,b.cy-centre.y)-Math.hypot(a.cx-centre.x,a.cy-centre.y));
+  const labs=[];
+  for(const {p,cx,cy} of order){
+    const w=p.t.length*CW;
+    let put=null;
+    for(const [dx,dy] of cand){
+      const lx=dx<0?cx+dx-w:cx+dx, ly=cy+dy;
+      if(lx<2||lx+w>W-2||ly<10||ly>Hh-3) continue;
+      const box={x1:lx-1.5,y1:ly-CH-0.5,x2:lx+w+1.5,y2:ly+2.5};
+      if(placed.some(q=>hit(box,q))) continue;
+      placed.push(box); put={lx,ly}; break;
+    }
+    labs.push({p,cx,cy,lx:put?.lx,ly:put?.ly});
+  }
 
-  const heads=labs.map(({p,lx,ly})=>{
+  const heads=labs.map(({p,cx,cy,lx,ly})=>{
     const col=qcol(p.x,p.y);
+    const label=(lx==null)?"":
+      `<text x="${lx.toFixed(1)}" y="${ly.toFixed(1)}" font-size="9" font-weight="600" fill="#3C4654"
+        font-family="ui-monospace,monospace" style="paint-order:stroke" stroke="#FCFCFD" stroke-width="3">${p.t}</text>`;
     return `<g data-qt="${p.t}" style="cursor:pointer">
-      <circle cx="${sx(p.x).toFixed(1)}" cy="${sy(p.y).toFixed(1)}" r="4.6" fill="${col}" stroke="#FFFFFF" stroke-width="1.6"/>
-      <circle cx="${sx(p.x).toFixed(1)}" cy="${sy(p.y).toFixed(1)}" r="9" fill="transparent"/>
-      <text x="${lx.toFixed(1)}" y="${ly.toFixed(1)}" font-size="9" font-weight="600" fill="#3C4654"
-        font-family="ui-monospace,monospace" style="paint-order:stroke" stroke="#FCFCFD" stroke-width="3">${p.t}</text>
-    </g>`;
+      <circle cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="4.4" fill="${col}" stroke="#FFFFFF" stroke-width="1.5"/>
+      <circle cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="10" fill="transparent"/>
+      ${label}</g>`;
   }).join("");
 
   const chip=(x,y,anchor,txt,col)=>
@@ -951,12 +981,13 @@ function renderQuad(){
 }
 function renderAll(){
   renderTop(); renderStrip(); renderMM(); renderSecBreadth(); renderSegs();
+  renderQuadSeg();
   renderHeat($("#heatUS"),"us");
   renderRows($("#rowsTheme"),"th");
   renderCryptoNote(); renderQuad();
   $("#krBlock").hidden=!CFG.showKR;
   if(CFG.showKR) renderRows($("#rowsKR"),"kr");
-  $("#footer").textContent=`SECTOR + BREADTH · v2.5 · 저장:${Store.mode}`;
+  $("#footer").textContent=`SECTOR + BREADTH · v2.6 · 저장:${Store.mode}`;
 }
 
 /* ════ 시트 ════ */
@@ -1140,6 +1171,9 @@ function bind(){
   $("#segPeriod").addEventListener("click",async e=>{
     const p=e.target.closest("button")?.dataset.p; if(!p)return;
     CFG.period=p; await Store.set(K.CFG,CFG); renderAll(); });
+  $("#segQuad").addEventListener("click",async e=>{
+    const q=e.target.closest("button")?.dataset.q; if(!q)return;
+    CFG.quadGroup=q; await Store.set(K.CFG,CFG); renderQuadSeg(); renderQuad(); });
   $("#segMode").addEventListener("click",async e=>{
     const m=e.target.closest("button")?.dataset.m; if(!m)return;
     CFG.mode=m; await Store.set(K.CFG,CFG); renderAll(); });
