@@ -723,6 +723,16 @@ def diagnose(tk: str):
 
 
 # ─────────────────────── 메인 ───────────────────────
+def _row_complete(r, need_sb):
+    """최신 행이 '다 채워졌는지'. Stockbee 값만 있고 자체 계산 칸(%>200·신고저)이
+    비어 있으면 미완성이다 — 이런 행을 '최신'으로 착각해 건너뛰면 빈 칸이 굳는다."""
+    if not r:
+        return False
+    if need_sb and not r.get("sb"):
+        return False
+    return r.get("a200") is not None and r.get("nh") is not None
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--limit", type=int, default=None, help="유니버스 상한 (테스트용)")
@@ -750,7 +760,8 @@ def main():
             prev_peek = {}
     if not args.force and prev_peek.get("asof") == sess_str:
         hist = (prev_peek.get("breadth") or {}).get("history") or []
-        done = hist and hist[-1].get("d") == sess_str and (hist[-1].get("sb") or args.no_stockbee)
+        done = bool(hist) and hist[-1].get("d") == sess_str and \
+            _row_complete(hist[-1], not args.no_stockbee)
         if done:
             print(f"이미 {sess_str} 데이터가 최신입니다 — 건너뜁니다.")
             return
@@ -802,6 +813,8 @@ def main():
         print("5) 브레스 계산")
         breadth, sectors = breadth_block(C, V, BREADTH_DAYS, secmap or None)
         if breadth:
+            print(f"  자체 계산 최신일 {breadth[-1]['d']} (기준 거래일 {sess_str})")
+        if breadth:
             universe = breadth[-1]["universe"]
             bsrc = "자체 계산 (yfinance)"
 
@@ -839,6 +852,9 @@ def main():
                 merged[d] = base
             bsrc = "Stockbee 원본 시트 · NH/NL·%MA·맥클렐란·섹터는 자체 계산"
             print(f"  {len(sb)}일 병합 (최신 {max(sb)})")
+            if breadth and max(sb) > breadth[-1]["d"]:
+                print(f"  ! 시트 최신일({max(sb)})이 자체 계산 최신일({breadth[-1]['d']})보다 앞섭니다 "
+                      f"— 그날 %>50·%>200·NH-NL 은 빈 칸으로 남습니다.")
         else:
             print("  ! 시트 접근 실패 — 자체 계산 유지")
     history = [merged[k] for k in sorted(merged)][-HISTORY_KEEP:]
