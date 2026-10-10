@@ -225,11 +225,12 @@ def fetch_fear_greed() -> dict:
             }
             hist = (j.get("fear_and_greed_historical") or {}).get("data") or []
             if hist:
-                out["history"] = [
-                    {"d": datetime.fromtimestamp(h["x"] / 1000, timezone.utc).strftime("%Y-%m-%d"),
-                     "v": round(float(h["y"]), 1)}
-                    for h in hist[-60:] if h.get("x") and h.get("y") is not None
-                ]
+                byd = {}                  # 같은 날짜가 두 번 오면(장중 포인트) 마지막 값만 남긴다
+                for h in hist[-61:]:
+                    if h.get("x") and h.get("y") is not None:
+                        d = datetime.fromtimestamp(h["x"] / 1000, timezone.utc).strftime("%Y-%m-%d")
+                        byd[d] = round(float(h["y"]), 1)
+                out["history"] = [{"d": d, "v": v} for d, v in sorted(byd.items())][-60:]
             print(f"  · F&G: {out['score']} ({out.get('rating')})")
             return out
         except Exception as e:
@@ -778,6 +779,16 @@ def main():
     C_etf = C_etf.loc[C_etf.index <= cutoff]
     V_etf = V_etf.loc[V_etf.index <= cutoff]
     print(f"  확정 거래일 {cutoff.date()} 까지만 사용 (장중 미완성 봉 제외)")
+    cut_str = cutoff.strftime("%Y-%m-%d")
+    if cut_str < sess_str and not args.force:
+        # 시세 벤더(yfinance)가 마지막 거래일 봉을 아직 안 냈다. 이대로 쓰면 시세는 하루 묵고
+        # Stockbee 행만 앞서 나가 %MA·신고저가 빈 칸인 반쪽 행이 생긴다.
+        # 이전 파일이 이미 같은 날짜까지 있으면 쓰지 않고 끝낸다 → 다음 예약 슬롯이 다시 시도한다.
+        if (prev_peek.get("asof") or "") >= cut_str:
+            print(f"  ! 시세가 아직 {cut_str} 까지만 나왔습니다(기준 {sess_str}). "
+                  f"새로 쓸 것이 없어 건너뜁니다 — 다음 슬롯에서 재시도.")
+            return
+        print(f"  ! 시세가 {cut_str} 까지만 나왔습니다(기준 {sess_str}). 받은 날짜까지만 반영합니다.")
     quotes = quotes_block(C_etf)
     dates, series = series_block(C_etf)
     print(f"  {len(quotes)}개 종목 / 시계열 {len(dates)}일")
@@ -844,6 +855,13 @@ def main():
     if not args.no_stockbee:
         print("6) Stockbee 원본 시트")
         sb = fetch_stockbee()
+        if sb:
+            # 시세 확정일 이후 원본 행은 넣지 않는다 — 자체 계산 칸이 빈 반쪽 행이 된다.
+            # 시트는 히스토리 전체를 주므로 다음 실행에서 자연히 채워진다.
+            late = [d for d in sb if d > cut_str]
+            if late:
+                print(f"  · 시세 확정일({cut_str}) 이후 원본 {len(late)}일은 다음 실행으로 미룹니다")
+                sb = {d: v for d, v in sb.items() if d <= cut_str}
         if sb:
             for d, vals in sb.items():
                 base = merged.get(d, {"d": d})
