@@ -564,11 +564,14 @@ function ingest(obj){
 }
 
 /* 통합 갱신 */
+/* 같은 폴더에 data.json 이 있으면(GitHub Pages) 설정 없이 바로 쓴다 */
+const feedOf=()=>CFG.feedUrl||(/^https?:$/.test(location.protocol)?"./data.json":"");
 async function refreshAll(){
   const btn=$("#btnRefresh"); btn.textContent="…"; btn.disabled=true;
   const errs=[]; let ok=false;
-  if(CFG.feedUrl){
-    try{ await fetchFeed(CFG.feedUrl); ok=true; }
+  const feed=feedOf();
+  if(feed){
+    try{ await fetchFeed(feed); ok=true; }
     catch(e){ errs.push("자동 수집: "+e.message); }
   }
   if(!ok){
@@ -1010,7 +1013,7 @@ function sheetFeed(){
       만드는 방법은 메뉴의 <b>자동화하는 방법</b>에 있습니다.
     </div>
     <label class="fl">data.json 주소</label>
-    <input id="fUrl" value="${CFG.feedUrl||""}" placeholder="https://<아이디>.github.io/<저장소>/data.json" inputmode="url" autocapitalize="off">
+    <input id="fUrl" value="${CFG.feedUrl||""}" placeholder="비우면 같은 폴더의 ./data.json 을 씁니다" inputmode="url" autocapitalize="off">
     <div class="btnrow"><button class="btn acc" id="fSave">저장하고 갱신</button>
       <button class="btn" id="fTest">연결만 확인</button></div>
     <div id="fOut" class="xs dim" style="margin-top:9px"></div>
@@ -1227,8 +1230,9 @@ function initPWA(){
   if(d) DATA=Object.assign(DATA,d);
   if(s) SNAP=s;
   bind(); try{ initPWA(); }catch(e){} renderAll();
-  const stale=!DATA.ts||(Date.now()-DATA.ts)>6*3600e3;
-  if(CFG.autoFetch&&stale&&(CFG.feedUrl||!DATA.ts)) setTimeout(refreshAll,300);
+  // 아침에 일찍 열어 전날 데이터를 받았어도, 1시간 지나면 다시 받는다(data.json 은 작다)
+  const stale=!DATA.ts||(Date.now()-DATA.ts)>3600e3;
+  if(CFG.autoFetch&&stale&&(feedOf()||!DATA.ts)) setTimeout(refreshAll,300);
 })();
 </script>
 </body>
