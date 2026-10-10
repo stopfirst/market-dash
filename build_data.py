@@ -56,10 +56,69 @@ SESSION = None   # main 에서 확정 거래일로 채운다
 
 
 # ─────────────────────── 거래일 판정 ───────────────────────
+def _easter(y: int):
+    """그레고리력 부활절(익명 알고리즘)."""
+    a, b, c = y % 19, y // 100, y % 100
+    d, e = b // 4, b % 4
+    f = (b + 8) // 25
+    g = (b - f + 1) // 3
+    h = (19 * a + b - d - g + 15) % 30
+    i, k = c // 4, c % 4
+    l = (32 + 2 * e + 2 * i - h - k) % 7
+    m = (a + 11 * h + 22 * l) // 451
+    mo = (h + l - 7 * m + 114) // 31
+    da = (h + l - 7 * m + 114) % 31 + 1
+    return datetime(y, mo, da).date()
+
+
+def _nth_weekday(y, mo, wd, n):
+    """n번째 요일(n=-1 이면 마지막). wd: 월=0."""
+    if n > 0:
+        d = datetime(y, mo, 1).date()
+        d += timedelta(days=(wd - d.weekday()) % 7)
+        return d + timedelta(weeks=n - 1)
+    nxt = datetime(y + (mo == 12), mo % 12 + 1, 1).date()
+    d = nxt - timedelta(days=1)
+    return d - timedelta(days=(d.weekday() - wd) % 7)
+
+
+def _observed(d):
+    if d.weekday() == 5:
+        return d - timedelta(days=1)
+    if d.weekday() == 6:
+        return d + timedelta(days=1)
+    return d
+
+
+def nyse_holidays(y: int) -> set:
+    """NYSE 정규 휴장일. 임시 휴장(국장·재난)은 포함하지 않는다."""
+    D = lambda m, d: datetime(y, m, d).date()
+    hs = {
+        _nth_weekday(y, 1, 0, 3),               # MLK
+        _nth_weekday(y, 2, 0, 3),               # Presidents
+        _easter(y) - timedelta(days=2),         # Good Friday
+        _nth_weekday(y, 5, 0, -1),              # Memorial
+        _observed(D(7, 4)),                     # Independence
+        _nth_weekday(y, 9, 0, 1),               # Labor
+        _nth_weekday(y, 11, 3, 4),              # Thanksgiving
+        _observed(D(12, 25)),                   # Christmas
+    }
+    if y >= 2022:
+        hs.add(_observed(D(6, 19)))             # Juneteenth
+    ny = D(1, 1)
+    if ny.weekday() != 5:                       # 토요일 신정은 전 금요일로 당기지 않는다(NYSE 규칙)
+        hs.add(_observed(ny))
+    return hs
+
+
+def is_trading_day(d) -> bool:
+    return d.weekday() < 5 and d not in nyse_holidays(d.year)
+
+
 def last_session_date():
     """미국 주식장 기준 '마지막으로 마감이 확정된 거래일'.
     뉴욕 시각 16:15 이전이면 전 거래일을 돌려준다(서머타임 자동 반영).
-    휴장일은 판별하지 않지만, 이 날짜 '이하'로만 자르므로 문제되지 않는다."""
+    주말과 NYSE 정규 휴장일을 건너뛴다. 임시 휴장은 모르지만 이 날짜 '이하'로만 자르므로 안전하다."""
     try:
         from zoneinfo import ZoneInfo
         now = datetime.now(ZoneInfo("America/New_York"))
@@ -68,7 +127,7 @@ def last_session_date():
     d = now.date()
     if now.hour * 60 + now.minute < 16 * 60 + 15:
         d -= timedelta(days=1)
-    while d.weekday() >= 5:                 # 토·일 → 직전 금요일
+    while not is_trading_day(d):            # 주말·NYSE 휴장일 → 직전 거래일
         d -= timedelta(days=1)
     return d
 
