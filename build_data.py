@@ -793,7 +793,7 @@ def _row_complete(r, need_sb):
     return r.get("a200") is not None and r.get("nh") is not None
 
 
-def chain_summation(history):
+def chain_summation(history, rebase_to=None):
     """맥클렐란 서메이션을 히스토리 전체에서 이어 붙인다.
     breadth_block 의 cumsum 은 '내려받은 첫날'이 원점이라 실행마다 원점이 하루씩 밀린다.
     그대로 60일씩 덮어쓰면 겹치는 경계에서 수천 단위로 끊긴다.
@@ -808,7 +808,16 @@ def chain_summation(history):
             acc = float(r.get("mcs") or 0.0)
         else:
             acc += float(mco)
-        r["mcs"] = round(acc)
+        r["mcs"] = acc
+    if acc is not None and rebase_to is not None:
+        # 1회 이전: 이어 붙인 뒤 최신값이 기존 화면 값과 같도록 전체를 평행이동
+        shift = float(rebase_to) - acc
+        for r in history:
+            if r.get("mco") is not None:
+                r["mcs"] += shift
+    for r in history:
+        if r.get("mco") is not None and r.get("mcs") is not None:
+            r["mcs"] = round(r["mcs"])
 
 
 def main():
@@ -953,7 +962,12 @@ def main():
         else:
             print("  ! 시트 접근 실패 — 자체 계산 유지")
     history = [merged[k] for k in sorted(merged)][-HISTORY_KEEP:]
-    chain_summation(history)
+    rebase = None
+    if prev.get("mcs_v") != 2:            # 연속 서메이션 도입 전 파일 → 최신값 기준으로 한 번 맞춘다
+        prev_hist = (prev.get("breadth") or {}).get("history") or []
+        last_old = next((r.get("mcs") for r in reversed(prev_hist) if r.get("mcs") is not None), None)
+        rebase = last_old
+    chain_summation(history, rebase)
 
     asof = dates[-1] if dates else prev.get("asof")
 
@@ -973,6 +987,7 @@ def main():
         "series": series or prev.get("series"),
         "quotes": quotes or prev.get("quotes", {}),
         "breadth": {"history": history},
+        "mcs_v": 2,                        # 서메이션 연속 체인 적용 표시
     }
     with open(args.out, "w", encoding="utf-8") as f:
         json.dump(out, f, ensure_ascii=False, separators=(",", ":"))
