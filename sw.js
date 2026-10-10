@@ -1,13 +1,14 @@
 /* 섹터·마켓브레스 서비스 워커
    화면과 데이터 모두 '네트워크 먼저, 실패하면 캐시'.
    → 새 버전을 올리면 바로 반영되고, 비행기·지하철에서도 마지막 화면이 열린다. */
-const V = "breadth-v1";
+const V = "breadth-v2";
 const SHELL = [
   "./sector-dashboard.html",
   "./manifest.json",
   "./icon.svg",
   "./icon-192.png",
   "./icon-512.png",
+  "./icon-maskable-512.png",
   "./apple-touch-icon.png"
 ];
 
