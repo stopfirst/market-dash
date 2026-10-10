@@ -14,6 +14,7 @@
 ```
 sector-dashboard.html          화면
 build_data.py                  data.json 을 만드는 스크립트
+requirements.txt               스크립트 패키지 목록
 .github/workflows/daily.yml    매일 자동 실행
 manifest.json                  앱 설치 정보 (PWA)
 sw.js                          오프라인 캐시 (서비스 워커)
@@ -36,21 +37,24 @@ icon-maskable-512.png / apple-touch-icon.png
 ## 자동 수집 붙이기 (30분)
 
 1. GitHub에 **public** 저장소를 만든다. (public이면 Actions가 무료로 무제한이다)
-2. 위 세 파일을 올린다. `daily.yml` 은 `.github/workflows/` 안에 둔다.
+2. 위 파일들을 올린다. `daily.yml` 은 `.github/workflows/` 안에만 둔다.
 3. Actions 탭 → `daily-data` → **Run workflow** 로 한 번 손으로 돌린다. 첫 실행은 10~30분 걸린다.
 4. Settings → Pages → Source를 `main` 브랜치 루트로 지정한다.
-5. 대시보드를 열고 `⋯` → **자동 수집 설정** 에 주소를 넣는다.
-   ```
-   https://<아이디>.github.io/<저장소>/data.json
-   ```
-6. 다음날부터는 07:30(한국시간)에 저절로 갱신된다. 갱신 버튼만 누르면 된다.
+5. `https://<아이디>.github.io/<저장소>/sector-dashboard.html` 을 연다.
+   같은 폴더의 `data.json` 을 자동으로 읽으므로 설정할 것이 없다.
+   다른 곳의 data.json 을 쓰려면 `⋯` → **자동 수집 설정** 에 주소를 넣는다.
+6. 평일 05:40·06:40·07:40(한국시간, 여름 기준) 세 슬롯으로 예약되어 있다.
+   GitHub 예약은 보통 수십 분~몇 시간 밀려 실제 갱신은 오전 9~11시쯤이다.
+   이미 최신이면 몇 초 만에 끝나고, 시세 벤더가 마지막 거래일 봉을 아직 안 냈으면
+   쓰지 않고 다음 슬롯에서 다시 시도한다.
 
-`data.json` 은 캐시가 남을 수 있다. 대시보드는 요청할 때마다 `?t=` 를 붙여 이를 피한다.
+`data.json` 은 캐시가 남을 수 있다. 대시보드는 요청할 때마다 `?t=` 를 붙여 이를 피하고,
+마지막으로 받은 지 1시간이 지났으면 열 때 자동으로 다시 받는다.
 
 ## 스크립트 사용법
 
 ```bash
-pip install yfinance pandas numpy requests
+pip install -r requirements.txt
 
 python build_data.py                 # 전체 (유니버스 5천개, 10~30분)
 python build_data.py --limit 800     # 빠르게 시험
@@ -106,7 +110,7 @@ T2108 계열은 Worden(TC2000) 지표라 유니버스까지 똑같이 재현할 
 4. **가격 수익률** — 배당 재투자 미포함(대부분 사이트와 같은 관례).
 5. **US10Y** — 소스(^TNX)가 %로 오기도, ×10 지수식으로 오기도 해서 스크립트가 자동 감지해 %로 맞춘다. 4~5%대가 정상.
 
-## 상대강도(RS) 계산## 상대강도(RS) 계산
+## 상대강도(RS) 계산
 
 모든 기간(1D·1W·1M·3M·6M·YTD)을 각각 따로 계산한다. 비율식이다:
 
