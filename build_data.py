@@ -793,6 +793,24 @@ def _row_complete(r, need_sb):
     return r.get("a200") is not None and r.get("nh") is not None
 
 
+def chain_summation(history):
+    """맥클렐란 서메이션을 히스토리 전체에서 이어 붙인다.
+    breadth_block 의 cumsum 은 '내려받은 첫날'이 원점이라 실행마다 원점이 하루씩 밀린다.
+    그대로 60일씩 덮어쓰면 겹치는 경계에서 수천 단위로 끊긴다.
+    → 첫 행의 저장된 값을 시드로 두고 mcs[t] = mcs[t-1] + mco[t] 로 다시 쌓는다.
+    오래된 행은 다시 계산되지 않으므로 시드는 실행이 바뀌어도 고정된다."""
+    acc = None
+    for r in history:
+        mco = r.get("mco")
+        if mco is None:
+            continue
+        if acc is None:
+            acc = float(r.get("mcs") or 0.0)
+        else:
+            acc += float(mco)
+        r["mcs"] = round(acc)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--limit", type=int, default=None, help="유니버스 상한 (테스트용)")
@@ -935,6 +953,7 @@ def main():
         else:
             print("  ! 시트 접근 실패 — 자체 계산 유지")
     history = [merged[k] for k in sorted(merged)][-HISTORY_KEEP:]
+    chain_summation(history)
 
     asof = dates[-1] if dates else prev.get("asof")
 
