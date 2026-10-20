@@ -43,6 +43,11 @@ ETFS    = sorted(set(MACRO + SECTORS + THEMES))
 VOL_4PCT    = 100_000    # 4% 스캔: 당일 거래량 ≥ 10만주 AND V > V1
 DOLLAR_VOL  = 250_000    # 25%/50%/13% 스캔: 20일 평균 종가×거래량 ≥ $250K
 MIN_C20     = 5.0        # 월간 스캔: 20일 전 종가 ≥ $5
+# Bull/Bear 20% Study: 5거래일 전 종가 대비 ±20%, 종가 ≥ $5, 당일 거래량 ≥ 10만주
+STUDY20_LB  = 5
+STUDY20_THR = 20.0
+STUDY20_PX  = 5.0
+STUDY20_VOL = 100_000
 TICKER_CAP  = 500        # 섹터별 상세 종목 수 상한 (사실상 전체, 폭주 방지용 천장)
 BREADTH_DAYS = 60        # 매 실행 시 다시 계산할 브레스 일수
 HISTORY_KEEP = 250       # data.json 에 남길 최대 일수
@@ -626,6 +631,14 @@ def breadth_block(C: pd.DataFrame, V: pd.DataFrame, days: int, sector_map=None):
     u13 = ((100 * ((C + .01) - (minc34 + .01)) / (minc34 + .01) >= 13) & dollar).sum(axis=1)
     d13 = ((100 * ((C + .01) - (maxc34 + .01)) / (maxc34 + .01) <= -13) & dollar).sum(axis=1)
 
+    # Bull/Bear 20% Study: 5거래일 전 종가 대비 ±20% 이상 움직인 종목 수.
+    # 필터는 종가 ≥ $5, 당일 거래량 ≥ 10만주 (당일 실제 거래량 기준이라 ffill 된 날은 빠진다)
+    c5 = C.shift(STUDY20_LB).replace(0, np.nan)
+    ch5 = 100 * (C - c5) / c5
+    s20ok = (C >= STUDY20_PX) & (V >= STUDY20_VOL)
+    b20u = ((ch5 >= STUDY20_THR) & s20ok).sum(axis=1)
+    b20d = ((ch5 <= -STUDY20_THR) & s20ok).sum(axis=1)
+
     # 추세 폭: T2108 계열은 Worden 지표라 정의(이동평균선 위 비율)만 같게 계산.
     # Worden 은 필터 없이 전 종목 기준 — 여기서도 필터 없이 계산한다.
     def above(win):
@@ -710,6 +723,7 @@ def breadth_block(C: pd.DataFrame, V: pd.DataFrame, days: int, sector_map=None):
             "m25u": val(m25u, d), "m25d": val(m25d, d),
             "m50u": val(m50u, d), "m50d": val(m50d, d),
             "u13": val(u13, d), "d13": val(d13, d),
+            "b20u": val(b20u, d), "b20d": val(b20d, d),
             "t2108": val(t2108, d), "a50": val(a50, d), "a200": val(a200, d),
             "nh": val(nh, d), "nl": val(nl, d), "universe": val(uni, d),
             "adv": val(adv, d), "dec": val(dec, d), "mco": val(mco, d), "mcs": val(mcs, d),
@@ -926,7 +940,7 @@ def main():
     merged = {r["d"]: r for r in old}
     # 자체 계산 병합: 이미 원본 시트(sb=1)로 채워진 행은 자체-전용 필드만 갱신한다.
     # 이렇게 해야 시트가 하루 죽어도 이미 받아둔 원본 숫자가 자체값으로 퇴행하지 않는다.
-    SELF_KEYS = ("nh", "nl", "a50", "a200", "adv", "dec", "mco", "mcs")
+    SELF_KEYS = ("nh", "nl", "a50", "a200", "adv", "dec", "mco", "mcs", "b20u", "b20d")
     for r in breadth:
         cur = merged.get(r["d"])
         if cur and cur.get("sb"):
