@@ -395,6 +395,10 @@ const MM_COLS=[
     {k:"u13",  t:"13/34↑",h:"34일간 13% 이상 상승"},
     {k:"d13",  t:"13/34↓",h:"34일간 13% 이상 하락"}
   ]},
+  {g:"20% STUDY", gk:"g2", c:[
+    {k:"b20u", t:"Bull20", h:"5거래일 전 대비 20% 이상 상승 (종가≥$5, 거래량≥10만주)"},
+    {k:"b20d", t:"Bear20", h:"5거래일 전 대비 20% 이상 하락 (종가≥$5, 거래량≥10만주)"}
+  ]},
   {g:"TREND", gk:"g3", c:[
     {k:"t2108",t:"T2108", h:"40일선 위 종목 비율(%)", d:1},
     {k:"a50",  t:"%>50",  h:"50일선 위 비율(%)", d:1},
@@ -660,6 +664,8 @@ function mmBg(k,v){
   if(k==="q25d") return v>1000?r(.24):v>500?r(.13):"";
   if(k==="m50u") return v>40?g(.18):"";
   if(k==="m50d") return v>40?r(.18):"";
+  if(k==="b20d") return v>=200?g(.30):v>=100?g(.16):"";   // 투매 극단 = 반등 대비
+  if(k==="b20u") return v<=25?g(.16):"";                    // 매수세 고갈 후 반등 경향
   if(k==="t2108") return v<20?r(.26):v<30?r(.13):v>80?g(.24):v>70?g(.12):"";
   if(k==="a50"||k==="a200") return v>60?g(.12):v<30?r(.16):"";
   if(k==="nhnl") return v>200?g(.16):v<-200?r(.20):"";
@@ -707,6 +713,9 @@ function renderMM(){
   if(isNum(t.r5)){ if(t.r5<0.5)F.push(["bull","5일비 "+t.r5.toFixed(2)+" — 단기 매도 극단"]);
     else if(t.r5>2)F.push(["warn","5일비 "+t.r5.toFixed(2)+" — 단기 과열"]); }
   if(isNum(t.q25u)&&t.q25u<300) F.push(["bull","분기 25%↑ "+fmtI(t.q25u)+" — 300 미만"]);
+  if(isNum(t.b20d)){ if(t.b20d>=200)F.push(["bull","Bear20 "+fmtI(t.b20d)+" — 200+ 투매 극단"]);
+    else if(t.b20d>=100)F.push(["bull","Bear20 "+fmtI(t.b20d)+" — 100+ 과매도 진입"]); }
+  if(isNum(t.b20u)&&t.b20u<=25) F.push(["bull","Bull20 "+fmtI(t.b20u)+" — 25 이하, 반등 경향"]);
   if(isNum(t.mco)){ if(t.mco<-70)F.push(["bull","맥클렐란 "+t.mco.toFixed(0)+" — 매도 극단"]);
     else if(t.mco>70)F.push(["warn","맥클렐란 +"+t.mco.toFixed(0)+" — 과열"]); }
   const fg=DATA.fng?.score;
@@ -793,7 +802,8 @@ function renderMM(){
     sp("t2108","T2108","#33506E")+
     sp("r10","10일 비율","#33506E")+
     sp("q25u","분기 25%↑","#157A4F")+
-    sp("q25d","분기 25%↓","#C0362C");
+    sp("q25d","분기 25%↓","#C0362C")+
+    sp(["b20u","b20d"],"20% Bull/Bear","",true);
 
   /* 보조 브레스 */
   const H60=H.slice(-60);
