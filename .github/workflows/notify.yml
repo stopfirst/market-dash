@@ -1,0 +1,44 @@
+name: telegram-notify
+# Hark 예약 브리핑이 workflow_dispatch 로 메시지를 넘기면 텔레그램으로 보낸다.
+# 필요한 저장소 Secrets: TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
+on:
+  workflow_dispatch:
+    inputs:
+      text:
+        description: "보낼 메시지 (일반 텍스트)"
+        required: true
+        type: string
+permissions:
+  contents: read
+jobs:
+  send:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Send to Telegram
+        env:
+          TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          CHAT: ${{ secrets.TELEGRAM_CHAT_ID }}
+          TEXT: ${{ inputs.text }}
+        run: |
+          if [ -z "$TOKEN" ] || [ -z "$CHAT" ]; then echo "::error::TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID secret 없음"; exit 1; fi
+          python3 - <<'PY'
+          import json, os, urllib.request
+          tok, chat, text = os.environ["TOKEN"], os.environ["CHAT"], os.environ["TEXT"]
+          # 텔레그램 한 메시지 최대 4096자 → 줄 단위로 나눠 보낸다
+          parts, cur = [], ""
+          for line in text.split("\n"):
+              if len(cur) + len(line) + 1 > 4000:
+                  parts.append(cur); cur = ""
+              cur += line + "\n"
+          if cur.strip(): parts.append(cur)
+          for p in parts:
+              req = urllib.request.Request(
+                  f"https://api.telegram.org/bot{tok}/sendMessage",
+                  data=json.dumps({"chat_id": chat, "text": p, "disable_web_page_preview": True}).encode(),
+                  headers={"Content-Type": "application/json"})
+              r = json.load(urllib.request.urlopen(req, timeout=20))
+              if not r.get("ok"):
+                  raise SystemExit(f"telegram error: {r}")
+          print(f"sent {len(parts)} message(s)")
+          PY
