@@ -40,11 +40,14 @@ jobs:
       - name: data.json 생성
         run: python build_data.py --out data.json ${{ inputs.force && '--force' || '' }}
  
+      - name: 오늘 신호 판단 (백테스트 결과 기반, 가벼움)
+        run: python backtest.py --predict || echo "predict 건너뜀"
+
       - name: 커밋
         run: |
           git config user.name  "github-actions"
           git config user.email "actions@github.com"
           git pull --rebase --autostash || true
-          git add data.json
+          git add data.json backtest/today.json 2>/dev/null || git add data.json
           git diff --staged --quiet || git commit -m "data: $(date -u +%Y-%m-%d)"
           git push
