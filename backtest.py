@@ -429,6 +429,32 @@ def composite(df, T):
     return out
 
 
+def split_stats(df, T):
+    """개별 신호를 전반부·후반부로 나눠 SPY 상승 비율을 각각 잰다(에피소드 첫날 기준)."""
+    if "SPY" not in T:
+        return {}
+    n = len(df)
+    first = pd.Series(np.arange(n) < n // 2, index=df.index)
+    halves = {"h1": first, "h2": ~first}
+    res = {"cut": df.index[n // 2].strftime("%Y-%m-%d"), "base": {}, "signals": {}}
+    for _, _, tk in HORIZONS:
+        tgt = T["SPY"][tk]
+        res["base"][tk] = {h: round(float((tgt[m].dropna() > 0).mean() * 100), 1) for h, m in halves.items()}
+    for key, label, rule in SIGNALS:
+        sig = eval_rule(df, rule)
+        ep = episodes(sig)
+        row = {"label": label}
+        for _, _, tk in HORIZONS:
+            tgt = T["SPY"][tk]
+            row[tk] = {}
+            for h, m in halves.items():
+                x = tgt[ep & m].dropna()
+                row[tk][h] = [int(len(x)), round(float((x > 0).mean() * 100), 1) if len(x) else None,
+                              round(float(x.mean()), 3) if len(x) else None]
+        res["signals"][key] = row
+    return res
+
+
 def run_backtest(args):
     os.makedirs(OUT_DIR, exist_ok=True)
     start_dt = (pd.Timestamp.utcnow().tz_localize(None) - pd.Timedelta(days=int(365 * args.years) + 420))
@@ -501,6 +527,7 @@ def run_backtest(args):
 
     print("5) 시계별 종합 신호")
     comp = composite(df, T)
+    split = split_stats(df, T)
 
     period = f"{df.index.min().date()} ~ {df.index.max().date()}"
     # ── summary.json (브리핑용, 작게) ──
@@ -517,6 +544,7 @@ def run_backtest(args):
                for k in ("gap1", "r5", "r10")},
         } for r in rows],
         "composite": comp,
+        "split": split,
         "model": {k: {x: v[x] for x in ("n_oos", "acc", "acc_always_up", "brier", "brier_base")}
                   for k, v in model_res.items()},
         "notes": "자체 계산 브레스(현재 상장 종목 기준, 카운트는 현재 유니버스 규모로 환산). "
@@ -528,7 +556,7 @@ def run_backtest(args):
         final_model["generated"] = summary["generated"]
         final_model["period"] = period
         json.dump(final_model, open(os.path.join(OUT_DIR, "model.json"), "w"), separators=(",", ":"))
-    json.dump({"signals": rows, "base": base, "buckets": buckets, "model": model_res, "composite": comp,
+    json.dump({"signals": rows, "base": base, "buckets": buckets, "model": model_res, "composite": comp, "split": split,
                "period": period},
               open(os.path.join(OUT_DIR, "full.json"), "w", encoding="utf-8"),
               ensure_ascii=False, separators=(",", ":"))
@@ -562,6 +590,18 @@ def run_backtest(args):
         for b in tb:
             L.append(f"| {b['bin']} | {b['n']} | {fmt(b.get('SPY_gap1'))} | {fmt(b.get('SPY_r5'))} | "
                      f"{b.get('SPY_r5_hit')} | {fmt(b.get('QQQ_gap1'))} | {fmt(b.get('QQQ_r5'))} |")
+    if split:
+        L += ["", f"## 개별 신호 전반부/후반부 분할 (SPY, 기준일 {split['cut']} 전/후, 상승 비율 % (n))", "",
+              "| 신호 | " + " | ".join(f"{tk} 전반 | {tk} 후반" for _, _, tk in HORIZONS) + " |",
+              "|---|" + "---|" * (2 * len(HORIZONS)),
+              "| 기준선 | " + " | ".join(f"{split['base'][tk]['h1']} | {split['base'][tk]['h2']}" for _, _, tk in HORIZONS) + " |"]
+        for k, r in split["signals"].items():
+            cells = []
+            for _, _, tk in HORIZONS:
+                for h in ("h1", "h2"):
+                    nn, hit, _ = r[tk][h]
+                    cells.append(f"{hit if hit is not None else '–'} ({nn})")
+            L.append(f"| {r['label']} | " + " | ".join(cells) + " |")
     if comp:
         L += ["", "## 시계별 종합 점수 (SPY, 점수 = 상승 신호 수 − 하락 신호 수, ±3 에서 자름)", "",
               "표본 밖 = 전반부 데이터로 신호를 고르고 후반부에서 잰 상승 비율.", ""]
