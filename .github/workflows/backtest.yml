@@ -1,0 +1,49 @@
+name: backtest
+
+on:
+  workflow_dispatch:
+    inputs:
+      years:
+        description: "백테스트 기간(년)"
+        default: "6"
+      reuse:
+        description: "저장된 breadth_long.csv 재사용 (전 종목 재다운로드 생략)"
+        type: boolean
+        default: false
+  schedule:
+    - cron: "0 3 1 * *"     # 매월 1일 12:00 KST — 월 1회 전체 재계산
+
+permissions:
+  contents: write
+
+concurrency:
+  group: backtest
+  cancel-in-progress: false
+
+jobs:
+  backtest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - name: 패키지 설치
+        run: pip install --quiet -r requirements.txt
+
+      - name: 백테스트 실행
+        run: python backtest.py --years "${{ inputs.years || '6' }}" ${{ inputs.reuse && '--reuse' || '' }}
+
+      - name: 커밋
+        run: |
+          git config user.name  "github-actions"
+          git config user.email "actions@github.com"
+          git pull --rebase --autostash || true
+          git add backtest/
+          git diff --staged --quiet || git commit -m "backtest: $(date -u +%Y-%m-%d)"
+          git push
