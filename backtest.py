@@ -344,6 +344,91 @@ def fmt(v, d=2):
     return "–" if v is None or (isinstance(v, float) and math.isnan(v)) else f"{v:+.{d}f}"
 
 
+
+# ─────────────────────── 시계별 종합 신호 ───────────────────────
+HORIZONS = [("open", "다음날 장초", "gap1"), ("close", "다음날 종가", "cc1"), ("week", "1주(5거래일)", "r5")]
+SEL_MIN_EP = 15      # 신호 채택 최소 에피소드 수
+SEL_EDGE = 6.0       # 기준선 대비 상승 비율 차이(%p)
+
+
+def _select(df, tgt: pd.Series, idx_mask: pd.Series):
+    """idx_mask 구간에서 에피소드 기준으로 tgt 상승 비율이 기준선보다 ±SEL_EDGE 이상인 신호를 고른다."""
+    base_hit = float((tgt[idx_mask].dropna() > 0).mean() * 100)
+    up, dn = [], []
+    for key, label, rule in SIGNALS:
+        if key.startswith("fng"):            # F&G 히스토리는 기간이 짧을 수 있어 종합에서 뺀다
+            continue
+        m = eval_rule(df, rule) & idx_mask
+        ep = episodes(m)
+        x = tgt[ep].dropna()
+        if len(x) < SEL_MIN_EP:
+            continue
+        hit = float((x > 0).mean() * 100)
+        if hit - base_hit >= SEL_EDGE:
+            up.append(key)
+        elif hit - base_hit <= -SEL_EDGE:
+            dn.append(key)
+    return up, dn, base_hit
+
+
+def _score(df, up, dn):
+    rules = {k: r for k, _, r in SIGNALS}
+    su = sum(eval_rule(df, rules[k]).astype(int) for k in up) if up else pd.Series(0, index=df.index)
+    sd = sum(eval_rule(df, rules[k]).astype(int) for k in dn) if dn else pd.Series(0, index=df.index)
+    return (su - sd).clip(-3, 3), su, sd
+
+
+def level_of(hit, base_hit, n, oos_hit=None, oos_base=None):
+    """과거 적중 기준 확신도. 높음은 표본 밖(후반부)에서도 같은 방향이어야 한다."""
+    if hit is None or n is None or n < 20:
+        return "낮음"
+    edge = hit - base_hit
+    same_oos = (oos_hit is not None and oos_base is not None and
+                (oos_hit - oos_base) * edge > 0 and abs(oos_hit - oos_base) >= 5)
+    if abs(edge) >= 15 and same_oos:
+        return "높음"
+    if abs(edge) >= 8:
+        return "보통"
+    return "낮음"
+
+
+def composite(df, T):
+    """시계별로 신호를 골라 점수(상승 신호 수 − 하락 신호 수)를 만들고, 점수별 실제 결과를 낸다.
+    전 구간 선택(표본 안)과, 전반부에서 고르고 후반부에서 평가(표본 밖) 두 가지를 함께 보고한다."""
+    if "SPY" not in T:
+        return {}
+    out = {}
+    n = len(df)
+    first = pd.Series(np.arange(n) < n // 2, index=df.index)
+    allm = pd.Series(True, index=df.index)
+    for hk, hlabel, tk in HORIZONS:
+        tgt = T["SPY"][tk]
+        up, dn, base_hit = _select(df, tgt, allm)
+        score, su, sd = _score(df, up, dn)
+        # 표본 밖: 전반부로 고르고 후반부로 평가
+        up_o, dn_o, _ = _select(df, tgt, first)
+        score_o, _, _ = _score(df, up_o, dn_o)
+        second = ~first
+        oos_base = float((tgt[second].dropna() > 0).mean() * 100)
+        bks = []
+        for sc in range(-3, 4):
+            m = score == sc
+            x = tgt[m].dropna()
+            xo = tgt[(score_o == sc) & second].dropna()
+            hit = round(float((x > 0).mean() * 100), 1) if len(x) else None
+            oh = round(float((xo > 0).mean() * 100), 1) if len(xo) >= 10 else None
+            bks.append({"score": sc, "n": int(len(x)),
+                        "hit": hit, "mean": round(float(x.mean()), 3) if len(x) else None,
+                        "oos_n": int(len(xo)), "oos_hit": oh,
+                        "level": level_of(hit, base_hit, len(x), oh, oos_base) if sc != 0 else "낮음"})
+        out[hk] = {"label": hlabel, "target": tk, "up": up, "dn": dn,
+                   "base_hit": round(base_hit, 1), "oos_base_hit": round(oos_base, 1),
+                   "buckets": bks,
+                   "last_strong": [d.strftime("%Y-%m-%d") for d in score[score.abs() >= 2].index[-5:]]}
+        print(f"  {hlabel}: 상승신호 {len(up)} / 하락신호 {len(dn)} · 기준 {base_hit:.1f}%")
+    return out
+
+
 def run_backtest(args):
     os.makedirs(OUT_DIR, exist_ok=True)
     start_dt = (pd.Timestamp.utcnow().tz_localize(None) - pd.Timedelta(days=int(365 * args.years) + 420))
@@ -414,6 +499,9 @@ def run_backtest(args):
             print(f"  SPY {tgt}: OOS 정확도 {res['acc']}% (항상 상승 가정 {res['acc_always_up']}%), "
                   f"Brier {res['brier']} vs {res['brier_base']}")
 
+    print("5) 시계별 종합 신호")
+    comp = composite(df, T)
+
     period = f"{df.index.min().date()} ~ {df.index.max().date()}"
     # ── summary.json (브리핑용, 작게) ──
     def short(s):
@@ -428,6 +516,7 @@ def run_backtest(args):
             **{f"{t}_{k}": short(r["ep"][t][k]) for t in ("SPY", "QQQ") if t in r["ep"]
                for k in ("gap1", "r5", "r10")},
         } for r in rows],
+        "composite": comp,
         "model": {k: {x: v[x] for x in ("n_oos", "acc", "acc_always_up", "brier", "brier_base")}
                   for k, v in model_res.items()},
         "notes": "자체 계산 브레스(현재 상장 종목 기준, 카운트는 현재 유니버스 규모로 환산). "
@@ -439,7 +528,8 @@ def run_backtest(args):
         final_model["generated"] = summary["generated"]
         final_model["period"] = period
         json.dump(final_model, open(os.path.join(OUT_DIR, "model.json"), "w"), separators=(",", ":"))
-    json.dump({"signals": rows, "base": base, "buckets": buckets, "model": model_res, "period": period},
+    json.dump({"signals": rows, "base": base, "buckets": buckets, "model": model_res, "composite": comp,
+               "period": period},
               open(os.path.join(OUT_DIR, "full.json"), "w", encoding="utf-8"),
               ensure_ascii=False, separators=(",", ":"))
 
@@ -472,6 +562,19 @@ def run_backtest(args):
         for b in tb:
             L.append(f"| {b['bin']} | {b['n']} | {fmt(b.get('SPY_gap1'))} | {fmt(b.get('SPY_r5'))} | "
                      f"{b.get('SPY_r5_hit')} | {fmt(b.get('QQQ_gap1'))} | {fmt(b.get('QQQ_r5'))} |")
+    if comp:
+        L += ["", "## 시계별 종합 점수 (SPY, 점수 = 상승 신호 수 − 하락 신호 수, ±3 에서 자름)", "",
+              "표본 밖 = 전반부 데이터로 신호를 고르고 후반부에서 잰 상승 비율.", ""]
+        for hk, c in comp.items():
+            L += [f"### {c['label']} ({c['target']}) — 기준 상승 비율 {c['base_hit']}% (후반부 {c['oos_base_hit']}%)",
+                  f"- 상승 쪽 신호: {', '.join(c['up']) or '없음'}",
+                  f"- 하락 쪽 신호: {', '.join(c['dn']) or '없음'}", "",
+                  "| 점수 | 일수 | 상승 비율 | 평균 % | 표본 밖 일수 | 표본 밖 상승 비율 | 확신도 |",
+                  "|---|---|---|---|---|---|---|"]
+            for b in c["buckets"]:
+                L.append(f"| {b['score']:+d} | {b['n']} | {b['hit'] if b['hit'] is not None else '–'} | "
+                         f"{fmt(b['mean'])} | {b['oos_n']} | {b['oos_hit'] if b['oos_hit'] is not None else '–'} | {b['level']} |")
+            L.append("")
     if model_res:
         L += ["", "## 로지스틱 모델 (SPY 상승 여부, walk-forward 표본 밖)", ""]
         for k, v in model_res.items():
@@ -522,6 +625,20 @@ def run_predict(args):
             active.append({k: s[k] for k in s if k != "rule"})
     out = {"d": df.index[-1].strftime("%Y-%m-%d"), "backtest_period": summary.get("period"),
            "base": summary.get("base"), "active": active}
+    comp = summary.get("composite") or {}
+    if comp:
+        rules = {k: r for k, _, r in SIGNALS}
+        out["horizons"] = {}
+        for hk, c in comp.items():
+            on_up = [k for k in c["up"] if eval_rule_row(row, rules[k])]
+            on_dn = [k for k in c["dn"] if eval_rule_row(row, rules[k])]
+            sc = max(-3, min(3, len(on_up) - len(on_dn)))
+            b = next((x for x in c["buckets"] if x["score"] == sc), {})
+            out["horizons"][hk] = {
+                "label": c["label"], "score": sc, "up_on": on_up, "dn_on": on_dn,
+                "lean": "상승" if sc > 0 else ("하락" if sc < 0 else "중립"),
+                "level": b.get("level", "낮음"), "hit": b.get("hit"), "n": b.get("n"),
+                "oos_hit": b.get("oos_hit"), "base_hit": c["base_hit"]}
     mp = os.path.join(OUT_DIR, "model.json")
     if os.path.exists(mp):
         model = json.load(open(mp))
