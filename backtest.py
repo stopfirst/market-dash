@@ -379,15 +379,19 @@ def _score(df, up, dn):
 
 
 def level_of(hit, base_hit, n, oos_hit=None, oos_base=None):
-    """과거 적중 기준 확신도. 높음은 표본 밖(후반부)에서도 같은 방향이어야 한다."""
+    """과거 적중 기준 확신도. 보통·높음 모두 표본 밖(후반부, n>=10)에서도 같은 방향이어야 한다.
+    표본 밖 결과가 없거나(표본 부족) 반대 방향이면 '낮음'."""
     if hit is None or n is None or n < 20:
         return "낮음"
     edge = hit - base_hit
-    same_oos = (oos_hit is not None and oos_base is not None and
-                (oos_hit - oos_base) * edge > 0 and abs(oos_hit - oos_base) >= 5)
-    if abs(edge) >= 15 and same_oos:
+    if oos_hit is None or oos_base is None:
+        return "낮음"
+    oedge = oos_hit - oos_base
+    if oedge * edge <= 0:
+        return "낮음"
+    if abs(edge) >= 15 and abs(oedge) >= 5:
         return "높음"
-    if abs(edge) >= 8:
+    if abs(edge) >= 8 and abs(oedge) >= 3:
         return "보통"
     return "낮음"
 
@@ -677,8 +681,12 @@ def run_predict(args):
             out["horizons"][hk] = {
                 "label": c["label"], "score": sc, "up_on": on_up, "dn_on": on_dn,
                 "lean": "상승" if sc > 0 else ("하락" if sc < 0 else "중립"),
-                "level": b.get("level", "낮음"), "hit": b.get("hit"), "n": b.get("n"),
-                "oos_hit": b.get("oos_hit"), "base_hit": c["base_hit"]}
+                # level 은 저장된 값 대신 현재 규칙으로 다시 계산(규칙 변경이 월간 재실행 전에도 반영되도록)
+                "level": (level_of(b.get("hit"), c["base_hit"], b.get("n"), b.get("oos_hit"),
+                                   c.get("oos_base_hit")) if sc != 0 and b else "낮음"),
+                "hit": b.get("hit"), "n": b.get("n"),
+                "oos_hit": b.get("oos_hit"), "oos_n": b.get("oos_n"),
+                "base_hit": c["base_hit"], "oos_base_hit": c.get("oos_base_hit")}
     mp = os.path.join(OUT_DIR, "model.json")
     if os.path.exists(mp):
         model = json.load(open(mp))
