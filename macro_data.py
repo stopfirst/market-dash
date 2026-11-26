@@ -184,6 +184,8 @@ def build() -> dict:
     for k in ("CPI", "CORE"):
         s = F[k]
         if len(s) > 15:
+            # 월 축으로 맞춘 뒤 빠진 달(2025-10, 셧다운으로 미발표)은 로그 보간 — 위치 기반 shift 가 한 달 밀리는 오류 방지
+            s = np.exp(np.log(s.resample("MS").last()).interpolate(limit_area="inside"))
             yoy = (s / s.shift(12) - 1) * 100
             a3 = ((s / s.shift(3)) ** 4 - 1) * 100
             infl[k] = {
@@ -321,7 +323,7 @@ def build() -> dict:
     def chk(name, val, verdict, alert):
         checks.append({"n": name, "v": val, "t": verdict, "a": alert})
     if dh:
-        chk("달러인덱스(DXY) 연고점", f"{q['DXY']['px']:.2f} · 고점 {dh['hi']:.2f} ({dh['hi_d']})",
+        chk("달러인덱스(DXY) 고점권", f"{q['DXY']['px']:.2f} · 고점 {dh['hi']:.2f} ({dh['hi_d']})",
             ("52주 고점 갱신" if dh["off"] >= -0.05 else (f"최근 5거래일 내 고점 · 현재 {dh['off']:+.1f}%" if dh["new5"] else f"고점 대비 {dh['off']:+.1f}%")), dh["near"])
     for k, nm in (("BROAD", "무역가중 달러 DTWEXBGS (BBDXY 대용)"), ("EMUSD", "신흥국 대비 달러 DTWEXEMEGS")):
         r = fx.get(k)
@@ -339,21 +341,21 @@ def build() -> dict:
         chk("엔화 진정 여부", f"{jp['px']:.2f}엔 · 1W {w1:+.1f}% · 1M {jp['m1']:+.1f}%",
             "엔 강세 전환 — 진정" if calm else ("엔 약세 지속 — 아시아 통화 압박" if w1 >= 1 else "1주 횡보 — 진정 미확인"), not calm)
     top = rank[:3]; bot = rank[-2:]
-    chk("자금 유입 섹터 (1M RS 상위)", " · ".join(f"{x['s']} {x['m1']:+.1f}%p" for x in top),
+    chk("자금 유입 섹터 (1M · SPY 대비 상위)", " · ".join(f"{x['s']} {x['m1']:+.1f}%" for x in top),
         "방어·내수 쪽으로 이동" if all(x["s"] in DEFENSE + ["XLI", "XLF", "XLY"] for x in top) else "공격 섹터 포함", False)
-    chk("자금 이탈 섹터 (1M RS 하위)", " · ".join(f"{x['s']} {x['m1']:+.1f}%p" for x in bot), "", False)
+    chk("자금 이탈 섹터 (1M · SPY 대비 하위)", " · ".join(f"{x['s']} {x['m1']:+.1f}%" for x in bot), "", False)
     rd, xy = q.get("RSPD"), q.get("XLY")
     if rd and xy and rd.get("m1") is not None and xy.get("m1") is not None:
         gap = rd["m1"] - xy["m1"]
         chk("미국 내수 소비 (균등가중 RSPD vs XLY)",
-            f"RSPD 1M {rd['m1']:+.1f}% · XLY {xy['m1']:+.1f}% · vs SPY {rd.get('rs_m1', 0):+.1f}%p",
+            f"RSPD 1M {rd['m1']:+.1f}% · XLY {xy['m1']:+.1f}% · vs SPY {rd.get('rs_m1', 0):+.1f}%",
             ("내수 소비로 자금 유입 — 대형 성장주보다 강함" if gap > 1 and (rd.get("rs_m1") or 0) > 0
              else "내수 소비 약세 — 소비 둔화 신호" if (rd.get("rs_m1") or 0) < -1
              else "XLY와 비슷 — 내수 특이 흐름 없음"), False)
     sm = q.get("SMH")
     if sm:
         alert = (sm.get("rs_m1") or 0) < -3
-        chk("반도체 SMH", f"${sm['px']:.1f} · 1M {sm['m1']:+.1f}% · vs SPY {sm.get('rs_m1', 0):+.1f}%p",
+        chk("반도체 SMH", f"${sm['px']:.1f} · 1M {sm['m1']:+.1f}% · vs SPY {sm.get('rs_m1', 0):+.1f}%",
             ("50일선 위" if sm["a50"] else "50일선 아래") + (" · 상대약세" if alert else ""), alert)
 
     idx = C.index[-KEEP:]
