@@ -322,7 +322,7 @@ def build() -> dict:
         checks.append({"n": name, "v": val, "t": verdict, "a": alert})
     if dh:
         chk("달러인덱스(DXY) 연고점", f"{q['DXY']['px']:.2f} · 고점 {dh['hi']:.2f} ({dh['hi_d']})",
-            "52주 고점 갱신" if dh["new5"] else f"고점 대비 {dh['off']:+.1f}%", dh["near"])
+            ("52주 고점 갱신" if dh["off"] >= -0.05 else (f"최근 5거래일 내 고점 · 현재 {dh['off']:+.1f}%" if dh["new5"] else f"고점 대비 {dh['off']:+.1f}%")), dh["near"])
     for k, nm in (("BROAD", "무역가중 달러 DTWEXBGS (BBDXY 대용)"), ("EMUSD", "신흥국 대비 달러 DTWEXEMEGS")):
         r = fx.get(k)
         if r and r.get("h52"):
@@ -334,17 +334,18 @@ def build() -> dict:
         chk("원/달러 1,340 안착", f"{kr['px']:,.1f}원 · 1W {kr['w1']:+.1f}%",
             "5거래일 연속 1,340 이상 — 안착" if hold else ("1,340 위 — 안착 확인 중" if kr["px"] >= 1340 else "1,340 아래"), hold)
     if jp:
-        calm = (jp.get("w1") or 0) <= 0
-        chk("엔화 진정 여부", f"{jp['px']:.2f}엔 · 1W {jp['w1']:+.1f}% · 1M {jp['m1']:+.1f}%",
-            "엔 강세 전환 — 진정" if calm else "엔 약세 지속 — 아시아 통화 압박", not calm)
+        w1 = jp.get("w1") or 0
+        calm = w1 <= -1
+        chk("엔화 진정 여부", f"{jp['px']:.2f}엔 · 1W {w1:+.1f}% · 1M {jp['m1']:+.1f}%",
+            "엔 강세 전환 — 진정" if calm else ("엔 약세 지속 — 아시아 통화 압박" if w1 >= 1 else "1주 횡보 — 진정 미확인"), not calm)
     top = rank[:3]; bot = rank[-2:]
-    chk("자금 유입 섹터 (1M RS 상위)", " · ".join(f"{x['s']} {x['m1']:+.1f}%" for x in top),
+    chk("자금 유입 섹터 (1M RS 상위)", " · ".join(f"{x['s']} {x['m1']:+.1f}%p" for x in top),
         "방어·내수 쪽으로 이동" if all(x["s"] in DEFENSE + ["XLI", "XLF", "XLY"] for x in top) else "공격 섹터 포함", False)
-    chk("자금 이탈 섹터 (1M RS 하위)", " · ".join(f"{x['s']} {x['m1']:+.1f}%" for x in bot), "", False)
+    chk("자금 이탈 섹터 (1M RS 하위)", " · ".join(f"{x['s']} {x['m1']:+.1f}%p" for x in bot), "", False)
     sm = q.get("SMH")
     if sm:
         alert = (sm.get("rs_m1") or 0) < -3
-        chk("반도체 SMH", f"${sm['px']:.1f} · 1M {sm['m1']:+.1f}% · vs SPY {sm.get('rs_m1', 0):+.1f}%",
+        chk("반도체 SMH", f"${sm['px']:.1f} · 1M {sm['m1']:+.1f}% · vs SPY {sm.get('rs_m1', 0):+.1f}%p",
             ("50일선 위" if sm["a50"] else "50일선 아래") + (" · 상대약세" if alert else ""), alert)
 
     idx = C.index[-KEEP:]

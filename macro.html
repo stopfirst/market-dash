@@ -179,13 +179,13 @@ function render(m){
     return `<tr><td class="nm">${NM[k]||k}<small>${k}</small></td><td>${r.px>=1000?r.px.toLocaleString("en-US",{maximumFractionDigits:0}):r.px.toFixed(2)}</td>
     ${["d1","w1","m1","m3"].map(p=>`<td class="${cls(r[p])}">${pc(r[p])}</td>`).join("")}<td>${r.a50==null?"":r.a50?'<span class="up">▲</span>':'<span class="dn">▼</span>'}</td></tr>`;};
   const rrow=k=>{const r=m.rates?.[k]; if(!r) return "";
-    return `<tr><td class="nm">${NM[k]}</td><td>${r.px.toFixed(2)}%</td><td class="dim">—</td>${["w1","m1","m3"].map(p=>`<td class="${isN(r[p])?(r[p]>0?"dn":r[p]<0?"up":""):""}">${bp(r[p])}</td>`).join("")}<td></td></tr>`;};
+    return `<tr><td class="nm">${NM[k]}<small>${r.d||""}</small></td><td>${r.px.toFixed(2)}%</td><td class="dim">—</td>${["w1","m1","m3"].map(p=>`<td class="${isN(r[p])?(r[p]>0?"dn":r[p]<0?"up":""):""}">${bp(r[p])}</td>`).join("")}<td></td></tr>`;};
   const frow=k=>{const r=m.fx?.[k]; if(!r) return "";
-    return `<tr><td class="nm">${NM[k]}<small>${k==="BROAD"?"DTWEXBGS":"DTWEXEMEGS"}</small></td><td>${r.px.toFixed(2)}</td><td class="dim">—</td>${["w1","m1","m3"].map(p=>`<td class="${isN(r[p])?(r[p]>0?"dn":r[p]<0?"up":""):""}">${pc(r[p])}</td>`).join("")}<td>${r.h52?.near?'<span class="dn">고점</span>':""}</td></tr>`;};
+    return `<tr><td class="nm">${NM[k]}<small>${k==="BROAD"?"DTWEXBGS":"DTWEXEMEGS"} · ${r.d}</small></td><td>${r.px.toFixed(2)}</td><td class="dim">—</td>${["w1","m1","m3"].map(p=>`<td class="${isN(r[p])?(r[p]>0?"dn":r[p]<0?"up":""):""}">${pc(r[p])}</td>`).join("")}<td>${r.h52?.near?'<span class="dn">고점</span>':""}</td></tr>`;};
   const G=(t,ks,f=row)=>`<tr class="g"><td colspan="7">${t}</td></tr>`+ks.map(f).join("");
   $("#map").innerHTML=`<tr><th>자산</th><th>현재</th><th>1D</th><th>1W</th><th>1M</th><th>3M</th><th>50일</th></tr>`+
     G("미국 지수",["SPY","QQQ","IWM","DIA","VIX"])+G("글로벌",["ACWI","EFA","EEM","KOSPI"])+
-    G("달러 · 환율",["DXY","USDKRW","USDJPY"])+G("무역가중 달러 (FRED, 금리칸 아님 · % 변화)",["BROAD","EMUSD"],frow)+
+    G("달러 · 환율",["DXY","USDKRW","USDJPY"])+G("무역가중 달러 (FRED 주간 · % 변화)",["BROAD","EMUSD"],frow)+
     G("원자재 · 크립토",["WTI","GOLD","BTC"])+G("반도체 · 레버리지",["SMH","TQQQ"])+G("채권 ETF",["SHY","TLT","LQD","HYG"])+
     G("금리 · 스프레드 (bp 변화, 빨강 = 상승)",["FFR","US2Y","US10Y","CURVE","HYOAS"],rrow);
 }
