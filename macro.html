@@ -131,7 +131,7 @@ function spark(arr,color){
 }
 
 function render(m){
-  $("#asof").textContent=`미국장 ${m.asof} 마감 기준 · 생성 ${new Date(m.generated).toLocaleString("ko-KR",{month:"numeric",day:"numeric",hour:"2-digit",minute:"2-digit"})}`;
+  $("#asof").textContent=`미국장 ${m.asof} 마감 기준 · 생성 ${(d=>isNaN(d)?"":d.toLocaleString("ko-KR",{month:"numeric",day:"numeric",hour:"2-digit",minute:"2-digit"}))(new Date(m.generated))}`;
   const rc={"상승 유입":"var(--up)","이탈":"var(--dn)","순환":"var(--amber)","혼조":"var(--ink-2)"}[m.regime]||"var(--ink)";
   $("#rgK").textContent=m.regime; $("#rgK").style.color=rc; $("#rgD").textContent=m.regime_desc;
   $("#rgS").textContent=`점수 ${m.score>0?"+":""}${m.score} / ±${m.max} · 섹터 분산 ${m.dispersion}%p`;

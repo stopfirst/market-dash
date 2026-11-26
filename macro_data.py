@@ -366,7 +366,7 @@ def build() -> dict:
 
     return {
         "asof": C.index[-1].strftime("%Y-%m-%d"),
-        "generated": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "generated": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S+00:00"),
         "regime": regime, "regime_desc": rdesc, "score": total, "max": len(S),
         "dispersion": round(disp, 2),
         "signals": S,
