@@ -13,7 +13,9 @@
 
 ```
 sector-dashboard.html          화면
+macro.html                     매크로 · 돈의 방향 (달러·2년물·원유·CPI·유동성·신용·글로벌·섹터)
 build_data.py                  data.json 을 만드는 스크립트
+macro_data.py                  data.json 의 "macro" 블록만 갱신 (yfinance + FRED 공개 CSV)
 requirements.txt               스크립트 패키지 목록
 .github/workflows/daily.yml    매일 자동 실행
 manifest.json                  앱 설치 정보 (PWA)
@@ -181,3 +183,11 @@ python build_data.py --why CAI
 | Cloudflare Workers | 브라우저에서 바로 호출 | 전 종목 스캔은 여전히 무리 |
 | Google Apps Script | 시트에 익숙하면 쉬움 | 지수·ETF까지만 |
 | EODHD · Polygon · Tiingo | 전 종목 일봉을 한 번에, 가장 깔끔 | 월 비용 |
+
+
+## 매크로 · 돈의 방향 (macro.html)
+
+차트보다 먼저 돈의 방향을 본다. 11개 신호(달러, 2년물, 원유, 근원 CPI, 연준 순유동성,
+하이일드 스프레드, S&P, 나스닥 상대강도, 글로벌, 섹터 공격/방어, VIX)를 +1/0/−1 로 매기고 합산해
+국면을 **상승 유입 / 순환 / 이탈 / 혼조** 로 판정한다. 기준값은 `macro_data.py` 맨 아래 신호 블록에 있다.
+매일 워크플로가 `python macro_data.py --out data.json` 으로 갱신한다(실패해도 기존 화면에는 영향 없음).

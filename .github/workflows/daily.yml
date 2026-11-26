@@ -40,6 +40,9 @@ jobs:
       - name: data.json 생성
         run: python build_data.py --out data.json ${{ inputs.force && '--force' || '' }}
  
+      - name: 매크로 자금흐름 (달러·금리·원유·CPI·유동성·신용·글로벌·섹터)
+        run: python macro_data.py --out data.json || echo "매크로 건너뜀"
+
       - name: 오늘 신호 판단 (백테스트 결과 기반, 가벼움)
         run: python backtest.py --predict || echo "predict 건너뜀"
 
