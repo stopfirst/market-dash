@@ -28,7 +28,7 @@ TICKERS = {
     "SHY": "SHY", "TLT": "TLT", "HYG": "HYG", "LQD": "LQD",
     "ACWI": "ACWI", "EFA": "EFA", "EEM": "EEM",
     "KOSPI": "^KS11", "USDKRW": "KRW=X", "USDJPY": "JPY=X", "BTC": "BTC-USD",
-    "SMH": "SMH", "TQQQ": "TQQQ",
+    "SMH": "SMH", "TQQQ": "TQQQ", "RSPD": "RSPD",
     "XLK": "XLK", "XLC": "XLC", "XLY": "XLY", "XLP": "XLP", "XLE": "XLE",
     "XLF": "XLF", "XLV": "XLV", "XLI": "XLI", "XLB": "XLB", "XLRE": "XLRE", "XLU": "XLU",
 }
@@ -342,6 +342,14 @@ def build() -> dict:
     chk("자금 유입 섹터 (1M RS 상위)", " · ".join(f"{x['s']} {x['m1']:+.1f}%p" for x in top),
         "방어·내수 쪽으로 이동" if all(x["s"] in DEFENSE + ["XLI", "XLF", "XLY"] for x in top) else "공격 섹터 포함", False)
     chk("자금 이탈 섹터 (1M RS 하위)", " · ".join(f"{x['s']} {x['m1']:+.1f}%p" for x in bot), "", False)
+    rd, xy = q.get("RSPD"), q.get("XLY")
+    if rd and xy and rd.get("m1") is not None and xy.get("m1") is not None:
+        gap = rd["m1"] - xy["m1"]
+        chk("미국 내수 소비 (균등가중 RSPD vs XLY)",
+            f"RSPD 1M {rd['m1']:+.1f}% · XLY {xy['m1']:+.1f}% · vs SPY {rd.get('rs_m1', 0):+.1f}%p",
+            ("내수 소비로 자금 유입 — 대형 성장주보다 강함" if gap > 1 and (rd.get("rs_m1") or 0) > 0
+             else "내수 소비 약세 — 소비 둔화 신호" if (rd.get("rs_m1") or 0) < -1
+             else "XLY와 비슷 — 내수 특이 흐름 없음"), False)
     sm = q.get("SMH")
     if sm:
         alert = (sm.get("rs_m1") or 0) < -3

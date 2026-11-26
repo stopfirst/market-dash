@@ -115,7 +115,7 @@ const pc=(v,d=1)=>isN(v)?(v>0?"+":"")+v.toFixed(d)+"%":"—";
 const bp=v=>isN(v)?(v>0?"+":"")+v+"bp":"—";
 const cls=v=>isN(v)?(v>0?"up":v<0?"dn":""):"";
 const COL={1:"var(--up)",0:"var(--ink-3)","-1":"var(--dn)"};
-const NM={SPY:"S&P 500",QQQ:"나스닥 100",IWM:"러셀 2000",DIA:"다우",ACWI:"전세계",EFA:"선진국(미국 外)",EEM:"신흥국",KOSPI:"코스피",USDJPY:"엔/달러",SMH:"반도체",TQQQ:"나스닥 3배",BROAD:"무역가중 달러(광의)",EMUSD:"신흥국 대비 달러",
+const NM={SPY:"S&P 500",QQQ:"나스닥 100",IWM:"러셀 2000",DIA:"다우",ACWI:"전세계",EFA:"선진국(미국 外)",EEM:"신흥국",KOSPI:"코스피",USDJPY:"엔/달러",SMH:"반도체",RSPD:"소비재 균등가중",TQQQ:"나스닥 3배",BROAD:"무역가중 달러(광의)",EMUSD:"신흥국 대비 달러",
   DXY:"달러인덱스",USDKRW:"원/달러",WTI:"WTI 원유",GOLD:"금",BTC:"비트코인",SHY:"단기채 1-3Y",TLT:"장기채 20Y+",HYG:"하이일드",LQD:"투자등급",VIX:"VIX",
   XLK:"기술",XLC:"커뮤니케이션",XLY:"경기소비재",XLP:"필수소비재",XLE:"에너지",XLF:"금융",XLV:"헬스케어",XLI:"산업재",XLB:"소재",XLRE:"부동산",XLU:"유틸리티",
   US2Y:"2년물 금리",US10Y:"10년물 금리",CURVE:"장단기차(10Y-2Y)",FFR:"기준금리(실효)",HYOAS:"하이일드 스프레드"};
@@ -186,7 +186,7 @@ function render(m){
   $("#map").innerHTML=`<tr><th>자산</th><th>현재</th><th>1D</th><th>1W</th><th>1M</th><th>3M</th><th>50일</th></tr>`+
     G("미국 지수",["SPY","QQQ","IWM","DIA","VIX"])+G("글로벌",["ACWI","EFA","EEM","KOSPI"])+
     G("달러 · 환율",["DXY","USDKRW","USDJPY"])+G("무역가중 달러 (FRED 주간 · % 변화)",["BROAD","EMUSD"],frow)+
-    G("원자재 · 크립토",["WTI","GOLD","BTC"])+G("반도체 · 레버리지",["SMH","TQQQ"])+G("채권 ETF",["SHY","TLT","LQD","HYG"])+
+    G("원자재 · 크립토",["WTI","GOLD","BTC"])+G("반도체 · 레버리지",["SMH","TQQQ"])+G("미국 내수 소비 (균등가중)",["RSPD"])+G("채권 ETF",["SHY","TLT","LQD","HYG"])+
     G("금리 · 스프레드 (bp 변화, 빨강 = 상승)",["FFR","US2Y","US10Y","CURVE","HYOAS"],rrow);
 }
 
