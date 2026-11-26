@@ -346,10 +346,6 @@ def build() -> dict:
         alert = (sm.get("rs_m1") or 0) < -3
         chk("반도체 SMH", f"${sm['px']:.1f} · 1M {sm['m1']:+.1f}% · vs SPY {sm.get('rs_m1', 0):+.1f}%",
             ("50일선 위" if sm["a50"] else "50일선 아래") + (" · 상대약세" if alert else ""), alert)
-    tq = q.get("TQQQ")
-    if tq and tq.get("h52"):
-        chk("TQQQ", f"${tq['px']:.2f} · 1M {tq['m1']:+.1f}%",
-            f"52주 고점 대비 {tq['h52']['off']:+.1f}% · 저점 ${tq['h52']['lo']:.2f}", (tq.get("m1") or 0) < -10)
 
     idx = C.index[-KEEP:]
     series = {k: ser(C[k], idx) for k in C.columns}
