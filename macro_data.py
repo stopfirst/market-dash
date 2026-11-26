@@ -27,7 +27,8 @@ TICKERS = {
     "VIX": "^VIX", "DXY": "DX-Y.NYB", "WTI": "CL=F", "GOLD": "GC=F",
     "SHY": "SHY", "TLT": "TLT", "HYG": "HYG", "LQD": "LQD",
     "ACWI": "ACWI", "EFA": "EFA", "EEM": "EEM",
-    "KOSPI": "^KS11", "USDKRW": "KRW=X", "BTC": "BTC-USD",
+    "KOSPI": "^KS11", "USDKRW": "KRW=X", "USDJPY": "JPY=X", "BTC": "BTC-USD",
+    "SMH": "SMH", "TQQQ": "TQQQ",
     "XLK": "XLK", "XLC": "XLC", "XLY": "XLY", "XLP": "XLP", "XLE": "XLE",
     "XLF": "XLF", "XLV": "XLV", "XLI": "XLI", "XLB": "XLB", "XLRE": "XLRE", "XLU": "XLU",
 }
@@ -46,6 +47,8 @@ FRED = {
     "TGA": "WTREGEN",          # 재무부 일반계정 (백만$, 주)
     "RRP": "RRPONTSYD",        # 역레포 (십억$, 일)
     "HYOAS": "BAMLH0A0HYM2",   # 하이일드 스프레드 (%)
+    "BROAD": "DTWEXBGS",       # 무역가중 달러(광의, 26개국) — BBDXY 무료 대용
+    "EMUSD": "DTWEXEMEGS",     # 신흥국 대비 무역가중 달러
 }
 PERIODS = {"d1": 1, "w1": 5, "m1": 21, "m3": 63}
 KEEP = 260
@@ -110,6 +113,18 @@ def stat(s: pd.Series) -> dict:
     return row
 
 
+def hi52(s: pd.Series) -> dict:
+    """52주(약 1년) 고점 대비 위치. near = 고점 1% 이내, new5 = 최근 5개 관측 안에 고점 갱신."""
+    s = s.dropna()
+    s = s[s.index > s.index[-1] - pd.Timedelta(days=365)]
+    if len(s) < 20:
+        return {}
+    hi = float(s.max()); lo = float(s.min()); last = float(s.iloc[-1])
+    return {"hi": round(hi, 3), "lo": round(lo, 3), "off": round((last / hi - 1) * 100, 2),
+            "near": bool(last >= hi * 0.99), "new5": bool(s.tail(5).max() >= hi),
+            "hi_d": s.idxmax().strftime("%Y-%m-%d")}
+
+
 def rate_stat(s: pd.Series) -> dict:
     """금리·스프레드: 변화를 bp 로."""
     s = s.dropna()
@@ -150,6 +165,19 @@ def build() -> dict:
                 r["rs_" + p] = round(((1 + r[p] / 100) / (1 + b[p] / 100) - 1) * 100, 2)
 
     rates = {k: rate_stat(F[k]) for k in ("US2Y", "US10Y", "CURVE", "FFR", "HYOAS") if len(F[k])}
+    for k in ("DXY", "USDKRW", "USDJPY", "TQQQ", "SMH"):
+        if k in q:
+            q[k]["h52"] = hi52(C[k])
+    fx = {}
+    for k in ("BROAD", "EMUSD"):
+        if len(F[k]):
+            r = rate_stat(F[k]); r.pop("w1", None)
+            s_ = F[k].dropna()
+            for kk, days in (("w1", 7), ("m1", 30), ("m3", 91)):
+                past = s_[s_.index <= s_.index[-1] - pd.Timedelta(days=days)]
+                r[kk] = round(float(s_.iloc[-1] / past.iloc[-1] - 1) * 100, 2) if len(past) else None
+            r["h52"] = hi52(s_)
+            fx[k] = r
 
     # 물가: YoY, 3개월 연율
     infl = {}
@@ -193,6 +221,20 @@ def build() -> dict:
                      "달러 약세 → 위험자산·신흥국으로 돈이 나가기 쉬움" if sc > 0 else
                      "달러 강세 → 달러로 돈이 빨려 들어감, 위험자산 역풍" if sc < 0 else
                      "달러 횡보 — 방향 중립"))
+    b = fx.get("BROAD"); em = fx.get("EMUSD"); dh = (q.get("DXY") or {}).get("h52") or {}
+    if b and b.get("h52"):
+        hot = sum(bool(x) for x in (dh.get("near"), b["h52"].get("near"), (em or {}).get("h52", {}).get("near")))
+        sc = -1 if hot >= 2 else 1 if (b.get("m1") or 0) < -1 else 0
+        S.append(sig("BROAD", "무역가중 달러", sc, f"광의 {b['px']:.1f} · 52주고점 대비 {b['h52']['off']:+.1f}%",
+                     f"DXY·광의·신흥국 달러 중 {hot}개가 52주 고점권 — 글로벌 강달러, 수출입·신흥국 압박" if sc < 0 else
+                     "무역가중 달러 약세 — 글로벌 유동성 우호" if sc > 0 else f"고점권 {hot}/3 — 강달러 압력 제한적"))
+    kr, jp = q.get("USDKRW"), q.get("USDJPY")
+    if kr and jp:
+        a, j = kr.get("m1") or 0, jp.get("m1") or 0
+        sc = -1 if a > 1 and j > 1 else 1 if a < -1 and j < -1 else 0
+        S.append(sig("ASIAFX", "아시아 통화", sc, f"원 {kr['px']:,.0f} · 엔 {jp['px']:.1f}",
+                     "원·엔 동반 약세 → 외국인 수급 이탈 압력" if sc < 0 else
+                     "원·엔 동반 강세 → 아시아로 자금 유입" if sc > 0 else "원·엔 엇갈림 / 진정"))
     r2 = rates.get("US2Y")
     if r2 and r2.get("m1") is not None:
         v = r2["m1"]
@@ -274,6 +316,41 @@ def build() -> dict:
     rank = sorted([{"s": s, "w1": g(s, "rs_w1"), "m1": g(s, "rs_m1"), "m3": g(s, "rs_m3")}
                    for s in secs if g(s, "rs_m1") is not None], key=lambda x: -x["m1"])
 
+    # ── 판단 근거 체크리스트 ──────────────────────────
+    checks = []
+    def chk(name, val, verdict, alert):
+        checks.append({"n": name, "v": val, "t": verdict, "a": alert})
+    if dh:
+        chk("달러인덱스(DXY) 연고점", f"{q['DXY']['px']:.2f} · 고점 {dh['hi']:.2f} ({dh['hi_d']})",
+            "52주 고점 갱신" if dh["new5"] else f"고점 대비 {dh['off']:+.1f}%", dh["near"])
+    for k, nm in (("BROAD", "무역가중 달러 DTWEXBGS (BBDXY 대용)"), ("EMUSD", "신흥국 대비 달러 DTWEXEMEGS")):
+        r = fx.get(k)
+        if r and r.get("h52"):
+            chk(nm, f"{r['px']:.2f} · 1M {r['m1']:+.1f}% ({r['d']})",
+                "52주 고점권" if r["h52"]["near"] else f"고점 대비 {r['h52']['off']:+.1f}%", r["h52"]["near"])
+    if kr:
+        ser_ = C["USDKRW"].dropna().tail(5)
+        hold = bool((ser_ >= 1340).all())
+        chk("원/달러 1,340 안착", f"{kr['px']:,.1f}원 · 1W {kr['w1']:+.1f}%",
+            "5거래일 연속 1,340 이상 — 안착" if hold else ("1,340 위 — 안착 확인 중" if kr["px"] >= 1340 else "1,340 아래"), hold)
+    if jp:
+        calm = (jp.get("w1") or 0) <= 0
+        chk("엔화 진정 여부", f"{jp['px']:.2f}엔 · 1W {jp['w1']:+.1f}% · 1M {jp['m1']:+.1f}%",
+            "엔 강세 전환 — 진정" if calm else "엔 약세 지속 — 아시아 통화 압박", not calm)
+    top = rank[:3]; bot = rank[-2:]
+    chk("자금 유입 섹터 (1M RS 상위)", " · ".join(f"{x['s']} {x['m1']:+.1f}%" for x in top),
+        "방어·내수 쪽으로 이동" if all(x["s"] in DEFENSE + ["XLI", "XLF", "XLY"] for x in top) else "공격 섹터 포함", False)
+    chk("자금 이탈 섹터 (1M RS 하위)", " · ".join(f"{x['s']} {x['m1']:+.1f}%" for x in bot), "", False)
+    sm = q.get("SMH")
+    if sm:
+        alert = (sm.get("rs_m1") or 0) < -3
+        chk("반도체 SMH", f"${sm['px']:.1f} · 1M {sm['m1']:+.1f}% · vs SPY {sm.get('rs_m1', 0):+.1f}%",
+            ("50일선 위" if sm["a50"] else "50일선 아래") + (" · 상대약세" if alert else ""), alert)
+    tq = q.get("TQQQ")
+    if tq and tq.get("h52"):
+        chk("TQQQ", f"${tq['px']:.2f} · 1M {tq['m1']:+.1f}%",
+            f"52주 고점 대비 {tq['h52']['off']:+.1f}% · 저점 ${tq['h52']['lo']:.2f}", (tq.get("m1") or 0) < -10)
+
     idx = C.index[-KEEP:]
     series = {k: ser(C[k], idx) for k in C.columns}
     for k in ("US2Y", "US10Y", "HYOAS"):
@@ -286,6 +363,7 @@ def build() -> dict:
         "regime": regime, "regime_desc": rdesc, "score": total, "max": len(S),
         "dispersion": round(disp, 2),
         "signals": S,
+        "checks": checks, "fx": fx,
         "q": q, "rates": rates, "infl": infl, "liq": liq,
         "sector_rank": rank,
         "dates": [d.strftime("%Y-%m-%d") for d in idx],

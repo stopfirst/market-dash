@@ -54,6 +54,9 @@ table.t tr.g td{font-family:var(--sans);font-size:11px;color:var(--steel);font-w
 .spk{display:flex;justify-content:space-between;align-items:baseline}
 .spk b{font-size:13px}.spk span{font-family:var(--mono);font-size:12.5px;font-weight:600}
 svg.sp{width:100%;height:46px;display:block;margin-top:4px}
+.ck{display:grid;grid-template-columns:18px 1fr;gap:2px 8px;padding:9px 0;border-bottom:1px solid var(--line-soft)}
+.ck:last-child{border-bottom:0}.ck-i{font-size:13px;line-height:20px}.ck-n{font-weight:600;font-size:13.5px}
+.ck-v{grid-column:2;font-family:var(--mono);font-size:12px;color:var(--ink-2)}.ck-t{grid-column:2;font-size:12.5px;font-weight:600}
 .big{font-family:var(--mono);font-size:20px;font-weight:700}
 .how{font-size:12.5px;color:var(--ink-2);line-height:1.7}
 .how b{color:var(--ink)}
@@ -68,7 +71,7 @@ svg.sp{width:100%;height:46px;display:block;margin-top:4px}
 </div></div>
 
 <div class="wrap">
-  <div class="sec" style="margin-top:14px"><h2>지금 국면</h2><span class="hint">11개 신호 합산</span></div>
+  <div class="sec" style="margin-top:14px"><h2>지금 국면</h2><span class="hint" id="nsig">신호 합산</span></div>
   <div class="card"><div class="regime"><div>
     <div class="rg-k" id="rgK">—</div><div class="rg-d" id="rgD"></div></div></div>
     <div class="meter" id="meter"></div>
@@ -77,6 +80,9 @@ svg.sp{width:100%;height:46px;display:block;margin-top:4px}
 
   <div class="sec"><h2>신호</h2><span class="hint">초록 = 위험자산 우호 · 빨강 = 역풍</span></div>
   <div class="card" id="sigs"></div>
+
+  <div class="sec"><h2>판단 근거</h2><span class="hint">강달러 · 아시아 통화 · 섹터 이동 체크</span></div>
+  <div class="card" id="checks"></div>
 
   <div class="sec"><h2>추세 (최근 60거래일)</h2></div>
   <div class="grid2" id="sparks"></div>
@@ -109,7 +115,7 @@ const pc=(v,d=1)=>isN(v)?(v>0?"+":"")+v.toFixed(d)+"%":"—";
 const bp=v=>isN(v)?(v>0?"+":"")+v+"bp":"—";
 const cls=v=>isN(v)?(v>0?"up":v<0?"dn":""):"";
 const COL={1:"var(--up)",0:"var(--ink-3)","-1":"var(--dn)"};
-const NM={SPY:"S&P 500",QQQ:"나스닥 100",IWM:"러셀 2000",DIA:"다우",ACWI:"전세계",EFA:"선진국(미국 外)",EEM:"신흥국",KOSPI:"코스피",
+const NM={SPY:"S&P 500",QQQ:"나스닥 100",IWM:"러셀 2000",DIA:"다우",ACWI:"전세계",EFA:"선진국(미국 外)",EEM:"신흥국",KOSPI:"코스피",USDJPY:"엔/달러",SMH:"반도체",TQQQ:"나스닥 3배",BROAD:"무역가중 달러(광의)",EMUSD:"신흥국 대비 달러",
   DXY:"달러인덱스",USDKRW:"원/달러",WTI:"WTI 원유",GOLD:"금",BTC:"비트코인",SHY:"단기채 1-3Y",TLT:"장기채 20Y+",HYG:"하이일드",LQD:"투자등급",VIX:"VIX",
   XLK:"기술",XLC:"커뮤니케이션",XLY:"경기소비재",XLP:"필수소비재",XLE:"에너지",XLF:"금융",XLV:"헬스케어",XLI:"산업재",XLB:"소재",XLRE:"부동산",XLU:"유틸리티",
   US2Y:"2년물 금리",US10Y:"10년물 금리",CURVE:"장단기차(10Y-2Y)",FFR:"기준금리(실효)",HYOAS:"하이일드 스프레드"};
@@ -127,6 +133,10 @@ function render(m){
   const rc={"상승 유입":"var(--up)","이탈":"var(--dn)","순환":"var(--amber)","혼조":"var(--ink-2)"}[m.regime]||"var(--ink)";
   $("#rgK").textContent=m.regime; $("#rgK").style.color=rc; $("#rgD").textContent=m.regime_desc;
   $("#rgS").textContent=`점수 ${m.score>0?"+":""}${m.score} / ±${m.max} · 섹터 분산 ${m.dispersion}%p`;
+  $("#nsig").textContent=m.max+"개 신호 합산";
+  $("#checks").innerHTML=(m.checks||[]).map(c=>`<div class="ck"><span class="ck-i" style="color:${c.a?"var(--dn)":"var(--ink-3)"}">${c.a?"●":"○"}</span>
+    <span class="ck-n">${c.n}</span><span class="ck-v">${c.v}</span>${c.t?`<span class="ck-t" style="color:${c.a?"var(--dn)":"var(--ink-2)"}">${c.t}</span>`:""}</div>`).join("")+
+    `<div class="xs dim" style="margin-top:6px">● = 주의(위험자산 압박) · BBDXY는 무료 데이터가 없어 연준 무역가중 달러(DTWEXBGS)로 대신 봅니다.</div>`;
   $("#meter").innerHTML=m.signals.map(s=>`<i style="background:${COL[s.s]};opacity:${s.s?1:.35}" title="${s.n}"></i>`).join("");
   $("#sigs").innerHTML=m.signals.map(s=>`<div class="sig"><span class="dot" style="background:${COL[s.s]}"></span>
     <span class="sig-n">${s.n}</span><span class="sig-v">${s.v}</span><span class="sig-w">${s.why}</span></div>`).join("");
@@ -170,10 +180,13 @@ function render(m){
     ${["d1","w1","m1","m3"].map(p=>`<td class="${cls(r[p])}">${pc(r[p])}</td>`).join("")}<td>${r.a50==null?"":r.a50?'<span class="up">▲</span>':'<span class="dn">▼</span>'}</td></tr>`;};
   const rrow=k=>{const r=m.rates?.[k]; if(!r) return "";
     return `<tr><td class="nm">${NM[k]}</td><td>${r.px.toFixed(2)}%</td><td class="dim">—</td>${["w1","m1","m3"].map(p=>`<td class="${isN(r[p])?(r[p]>0?"dn":r[p]<0?"up":""):""}">${bp(r[p])}</td>`).join("")}<td></td></tr>`;};
+  const frow=k=>{const r=m.fx?.[k]; if(!r) return "";
+    return `<tr><td class="nm">${NM[k]}<small>${k==="BROAD"?"DTWEXBGS":"DTWEXEMEGS"}</small></td><td>${r.px.toFixed(2)}</td><td class="dim">—</td>${["w1","m1","m3"].map(p=>`<td class="${isN(r[p])?(r[p]>0?"dn":r[p]<0?"up":""):""}">${pc(r[p])}</td>`).join("")}<td>${r.h52?.near?'<span class="dn">고점</span>':""}</td></tr>`;};
   const G=(t,ks,f=row)=>`<tr class="g"><td colspan="7">${t}</td></tr>`+ks.map(f).join("");
   $("#map").innerHTML=`<tr><th>자산</th><th>현재</th><th>1D</th><th>1W</th><th>1M</th><th>3M</th><th>50일</th></tr>`+
     G("미국 지수",["SPY","QQQ","IWM","DIA","VIX"])+G("글로벌",["ACWI","EFA","EEM","KOSPI"])+
-    G("달러 · 원자재 · 크립토",["DXY","USDKRW","WTI","GOLD","BTC"])+G("채권 ETF",["SHY","TLT","LQD","HYG"])+
+    G("달러 · 환율",["DXY","USDKRW","USDJPY"])+G("무역가중 달러 (FRED, 금리칸 아님 · % 변화)",["BROAD","EMUSD"],frow)+
+    G("원자재 · 크립토",["WTI","GOLD","BTC"])+G("반도체 · 레버리지",["SMH","TQQQ"])+G("채권 ETF",["SHY","TLT","LQD","HYG"])+
     G("금리 · 스프레드 (bp 변화, 빨강 = 상승)",["FFR","US2Y","US10Y","CURVE","HYOAS"],rrow);
 }
 
