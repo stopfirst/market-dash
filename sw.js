@@ -1,8 +1,9 @@
 /* 섹터·마켓브레스 서비스 워커
    화면과 데이터 모두 '네트워크 먼저, 실패하면 캐시'.
    → 새 버전을 올리면 바로 반영되고, 비행기·지하철에서도 마지막 화면이 열린다. */
-const V = "breadth-v9";
+const V = "breadth-v10";
 const SHELL = [
+  "./index.html",
   "./sector-dashboard.html",
   "./macro.html",
   "./manifest.json",
@@ -48,7 +49,7 @@ self.addEventListener("fetch", e => {
         const hit = await caches.match(req, { ignoreSearch: true });
         if (hit) return hit;
         if (req.mode === "navigate") {
-          const shell = await caches.match("./sector-dashboard.html");
+          const shell = await caches.match("./index.html") || await caches.match("./sector-dashboard.html");
           if (shell) return shell;
         }
         return new Response("오프라인", { status: 503, statusText: "offline" });

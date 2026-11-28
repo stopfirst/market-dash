@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#FCFCFD">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="마켓">
+<title>마켓 대시보드</title>
+<link rel="icon" href="./icon.svg" type="image/svg+xml">
+<link rel="alternate icon" href="./icon-192.png">
+<link rel="manifest" href="./manifest.json">
+<link rel="apple-touch-icon" href="./apple-touch-icon.png">
+<style>
+:root{--paper:#FCFCFD;--card:#fff;--line:#E4E7EC;--ink:#13171E;--ink-2:#4B5563;--ink-3:#8A93A0;--steel:#33506E;--steel-soft:#EDF1F6;
+  --up:#157A4F;--dn:#C0362C;--amber:#B4740E;--crypto:#0E1116;
+  --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;
+  --sans:-apple-system,BlinkMacSystemFont,"Pretendard","Apple SD Gothic Neo","Noto Sans KR",system-ui,Roboto,sans-serif}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0}
+body{background:var(--paper);color:var(--ink);font-family:var(--sans);font-size:15px;line-height:1.5;-webkit-font-smoothing:antialiased;
+  padding:calc(env(safe-area-inset-top) + 18px) 0 calc(env(safe-area-inset-bottom) + 28px)}
+.wrap{max-width:760px;margin:0 auto;padding:0 14px}
+.date{font-family:var(--mono);font-size:13px;color:var(--ink-2)}
+h1{font-size:24px;margin:2px 0 18px;letter-spacing:-.02em}
+.sec{display:flex;align-items:baseline;justify-content:space-between;margin:22px 2px 8px}
+.sec b{font-size:13px;letter-spacing:.08em;color:var(--ink-3);font-family:var(--mono)}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+@media(min-width:620px){.grid.c3{grid-template-columns:1fr 1fr 1fr}}
+a.tile{display:flex;flex-direction:column;gap:6px;min-height:112px;padding:14px;border-radius:12px;background:var(--card);
+  border:1px solid var(--line);color:inherit;text-decoration:none;position:relative}
+a.tile:active{transform:scale(.985);background:var(--steel-soft)}
+a.tile.wide{grid-column:1/-1}
+a.tile.dark{background:var(--crypto);border-color:#232a35;color:#E7ECF3}
+a.tile.dark:active{background:#171c24}
+.t{font-weight:700;font-size:16px}
+.d{font-size:12px;color:var(--ink-3);line-height:1.45}
+.dark .d{color:#8B95A5}
+.v{margin-top:auto;font-family:var(--mono);font-size:12.5px;color:var(--ink-2);font-variant-numeric:tabular-nums}
+.dark .v{color:#C9D2DE}
+.arr{position:absolute;top:12px;right:13px;color:var(--ink-3);font-size:15px}
+.up{color:var(--up)}.dn{color:var(--dn)}.dark .up{color:#3DDC97}.dark .dn{color:#FF6B6B}
+.big{font-size:22px;font-weight:700;font-family:var(--mono);color:var(--ink);letter-spacing:-.02em}
+.dark .big{color:#fff}
+.foot{margin-top:26px;font-size:11.5px;color:var(--ink-3);line-height:1.6}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="date" id="today">—</div>
+  <h1>마켓 대시보드</h1>
+
+  <div class="sec"><b>미국 주식</b></div>
+  <div class="grid">
+    <a class="tile wide" href="./sector-dashboard.html">
+      <span class="arr">›</span>
+      <span class="t">섹터 · 마켓 브레스</span>
+      <span class="d">지수·섹터 상대강도, Stockbee 마켓 모니터, F&amp;G</span>
+      <span class="v" id="vSector">불러오는 중…</span>
+    </a>
+    <a class="tile wide" href="./macro.html">
+      <span class="arr">›</span>
+      <span class="t">매크로 · 돈의 방향</span>
+      <span class="d">금리·달러·유동성·인플레이션 체크리스트와 국면</span>
+      <span class="v" id="vMacro">불러오는 중…</span>
+    </a>
+  </div>
+
+  <div class="sec"><b>크립토</b><a class="d" href="./crypto/index.html" style="text-decoration:none">허브 ›</a></div>
+  <div class="grid c3">
+    <a class="tile dark" href="./crypto/liq.html">
+      <span class="arr">›</span>
+      <span class="t">청산 지도</span>
+      <span class="d">하이퍼리퀴드 가격대별 청산 물량</span>
+      <span class="v" id="vLiq">불러오는 중…</span>
+    </a>
+    <a class="tile dark" href="./crypto/desk.html">
+      <span class="arr">›</span>
+      <span class="t">분석 데스크</span>
+      <span class="d">캔들·구간·CVD·OI 변화</span>
+      <span class="v" id="vDesk">BTC · ETH · SOL</span>
+    </a>
+    <a class="tile dark" href="./crypto/stable.html">
+      <span class="arr">›</span>
+      <span class="t">스테이블코인</span>
+      <span class="d">총공급과 하루·7일·30일 변화</span>
+      <span class="v" id="vStable">불러오는 중…</span>
+    </a>
+    <a class="tile dark" href="./crypto/sr.html">
+      <span class="arr">›</span>
+      <span class="t">지지/저항 봇</span>
+      <span class="d">1D·4H 구간과 근접 시 판정</span>
+      <span class="v" id="vSr">BTC · ETH · SOL</span>
+    </a>
+  </div>
+
+  <div class="foot">각 화면 위쪽의 메뉴 버튼으로 언제든 이 화면으로 돌아올 수 있어요.</div>
+</div>
+<script>
+const $ = id => document.getElementById(id);
+const W = ['일','월','화','수','목','금','토'];
+(() => { const k = new Date(Date.now() + 9 * 3600e3);
+  $('today').textContent = `${k.getUTCFullYear()}.${String(k.getUTCMonth()+1).padStart(2,'0')}.${String(k.getUTCDate()).padStart(2,'0')} ${W[k.getUTCDay()]}`; })();
+const sg = (v, d = 1) => (v > 0 ? '+' : v < 0 ? '−' : '') + Math.abs(v).toFixed(d);
+const cls = v => v > 0 ? 'up' : v < 0 ? 'dn' : '';
+const eok = v => { const a = Math.abs(v); return (v < 0 ? '−' : '') + (a >= 1e12 ? (a/1e12).toFixed(2) + '조' : a >= 1e8 ? Math.round(a/1e8).toLocaleString() + '억' : Math.round(a).toLocaleString()); };
+async function j(u){ const r = await fetch(u, {cache: 'no-store'}); if (!r.ok) throw new Error(r.status); return r.json(); }
+
+j('./data.json?t=' + Date.now()).then(d => {
+  const f = d.fng || {}, h = (d.breadth && d.breadth.history) || [], b = h[h.length - 1] || {};
+  $('vSector').innerHTML = `<span class="big ${f.score < 25 ? 'dn' : f.score > 75 ? 'up' : ''}">F&amp;G ${f.score != null ? Math.round(f.score) : '—'}</span><br>`
+    + `T2108 ${b.t2108 != null ? b.t2108.toFixed(1) : '—'} · 10일비 ${b.r10 != null ? b.r10.toFixed(2) : '—'} · 기준 ${d.asof || '—'}`;
+  const m = d.macro;
+  $('vMacro').innerHTML = m ? `<span class="big">${m.regime}</span><br>점수 ${m.score > 0 ? '+' : ''}${m.score} / ${m.max} · 기준 ${m.asof || d.asof}` : '데이터 준비 중';
+}).catch(() => { $('vSector').textContent = $('vMacro').textContent = '데이터를 못 불러왔어요'; });
+
+j('https://raw.githubusercontent.com/stopfirst/market-dash/liq-data/liq.json?t=' + Math.floor(Date.now() / 120000)).then(d => {
+  const c = d.coins.BTC, k = new Date((d.updated + 9 * 3600) * 1000);
+  $('vLiq').innerHTML = `<span class="big">${Math.round(c.price).toLocaleString()}</span><br>BTC · ${String(k.getUTCHours()).padStart(2,'0')}:${String(k.getUTCMinutes()).padStart(2,'0')} 갱신`;
+}).catch(() => { $('vLiq').textContent = 'BTC · 데이터 대기'; });
+
+j('https://stablecoins.llama.fi/stablecoincharts/all').then(a => {
+  const v = a.map(x => +((x.totalCirculatingUSD || {}).peggedUSD || 0)).filter(x => x > 0), L = v.length - 1;
+  $('vStable').innerHTML = `<span class="big">${eok(v[L])} 달러</span><br><span class="${cls(v[L]-v[L-7])}">7일 ${eok(v[L]-v[L-7])} 달러</span>`;
+}).catch(() => { $('vStable').textContent = 'DefiLlama'; });
+
+if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('./sw.js').catch(() => {});
+</script>
+</body>
+</html>

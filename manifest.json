@@ -2,7 +2,7 @@
   "name": "섹터 · 마켓브레스",
   "short_name": "브레스",
   "description": "미국 섹터·테마 상대강도와 Stockbee 마켓브레스 데일리 대시보드",
-  "start_url": "./sector-dashboard.html",
+  "start_url": "./index.html",
   "scope": "./",
   "display": "standalone",
   "orientation": "portrait-primary",

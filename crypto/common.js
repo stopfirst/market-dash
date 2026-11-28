@@ -246,6 +246,6 @@ function fvgs(bars, tf, maxN = 3){
 
 /* 공용 상단바 */
 function topbar(active){
-  const items = [['index.html','허브'],['liq.html','청산 지도'],['desk.html','분석 데스크'],['stable.html','스테이블코인'],['sr.html','지지/저항 봇']];
+  const items = [['../index.html','메뉴'],['index.html','허브'],['liq.html','청산 지도'],['desk.html','분석 데스크'],['stable.html','스테이블코인'],['sr.html','지지/저항 봇']];
   document.getElementById('top').innerHTML = `<div class="brand"><i></i>TRADING DESK</div><div class="nav">${items.map(([h,t]) => `<a href="${h}" class="${h===active?'on':''}">${t}</a>`).join('')}</div>`;
 }
