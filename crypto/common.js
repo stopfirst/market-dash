@@ -215,7 +215,9 @@ function srZones(d1, h4, h1, price){
   for (const m of merged) { let cross = 0; for (let i = 1; i < recent.length; i++) { const a = recent[i-1].c, b = recent[i].c; if ((a - m.lo) * (b - m.lo) < 0 || (a - m.hi) * (b - m.hi) < 0) cross++; } m.score -= cross * .5; m.cross = cross; }
   const above = merged.filter(m => m.lo > price).sort((a, b) => a.lo - b.lo);
   const below = merged.filter(m => m.hi < price).sort((a, b) => b.hi - a.hi);
-  const pick = arr => { const near = arr.slice(0, 6).filter(m => m.score >= 1); return near.slice(0, 2); };
+  const pick = arr => { const out = [];
+    for (const m of arr.slice(0, 8)) { if (m.score < 1) continue; if (out.some(o => m.lo <= o.hi * 1.002 && m.hi >= o.lo * .998)) { const o = out.find(o => m.lo <= o.hi * 1.002 && m.hi >= o.lo * .998); o.lo = Math.min(o.lo, m.lo); o.hi = Math.max(o.hi, m.hi); o.score += m.score; m.tfs.forEach(t => o.tfs.add(t)); continue; } out.push({...m, tfs: new Set(m.tfs)}); if (out.length >= 2) break; }
+    return out; };
   const R = pick(above), S = pick(below);
   const label = (m, i, p) => { const tfs = ['1D','4H','1H'].filter(t => m.tfs.has(t)); return {...m, name: p + (i + 1), tfs: tfs.join(' / '), kind: m.score >= 3 ? '원점' : '반응'}; };
   const zones = [...R.map((m, i) => label(m, i, 'R')), ...S.map((m, i) => label(m, i, 'S'))];

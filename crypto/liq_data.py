@@ -166,7 +166,7 @@ def build(states, ctx, prev_big, t):
             "cov_short": round(cov_s / oi, 4) if oi else None,
             "liq_long_usd": round(liq_l), "liq_short_usd": round(liq_s),
             "out_long_usd": round(out_l), "out_short_usd": round(out_s),
-            "positions": cnt, "big": big[:60],
+            "positions": cnt, "big": big[:60], "_bigall": big,
         }
     return res
 
@@ -249,9 +249,9 @@ async def main():
 
     res = build(merged, ctx, st.get("big", {}), t0)
     st["big"] = {f"{b['addr']}:{c}:{'L' if b['side']=='롱' else 'S'}": {"first": b["first"], "size": b["size"]}
-                 for c in COINS for b in res[c]["big"]}
+                 for c in COINS for b in res[c].pop("_bigall")}
 
-    out = {"updated": t0, "source": "Hyperliquid", "scanned": len(states), "reused": stale,
+    out = {"updated": now(), "started": t0, "source": "Hyperliquid", "scanned": len(states), "reused": stale,
            "addresses": len(addrs), "range": RANGE, "step": STEP, "coins": res}
     os.makedirs(os.path.dirname(a.out) or ".", exist_ok=True)
     json.dump(out, open(a.out, "w"), ensure_ascii=False, separators=(",", ":"))

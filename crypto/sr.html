@@ -37,7 +37,7 @@ function judge(){
   const pch = (bars[bars.length-1].c / bars[0].o - 1) * 100;
   const oich = oi.length > 1 ? (oi[oi.length-1].oi / oi[0].oi - 1) * 100 : null;
   const ev = {delta, vol, pch, oich, dist: best * 100, near};
-  if (!near || best > .006) return {txt: `${near ? near.name + '까지 ' + nf(best*100,1) + '% · ' : ''}${S.zones.some(z=>z.name[0]==='S') ? '지지' : ''} 조건 충족 후보 없음 · 관망`, cls: 'mu', ev};
+  if (!near || best > .006) return {txt: `${near ? '가장 가까운 ' + near.name + '까지 ' + nf(best*100,1) + '% · ' : ''}근접한 구간 없음 · 관망`, cls: 'mu', ev};
   const sup = near.name[0] === 'S', dr = delta / vol;
   let txt, cls;
   if (sup) {
