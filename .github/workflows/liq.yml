@@ -33,7 +33,7 @@ jobs:
           key: hl-state-${{ github.run_id }}
           restore-keys: hl-state-
       - name: 포지션 수집
-        run: python crypto/liq_data.py --out out/liq.json --state state/hl_state.json --ws 240 --budget 960 --conc 10
+        run: python crypto/liq_data.py --out out/liq.json --state state/hl_state.json --ws 240 --sub-budget 240 --budget 960 --conc 10
       - name: 주소 캐시 저장
         if: always()
         uses: actions/cache/save@v4

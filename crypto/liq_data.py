@@ -4,6 +4,7 @@
 하이퍼리퀴드는 모든 지갑의 포지션과 청산가가 공개돼 있다. 다만 '전체 지갑 목록' API가 없어서
   1) 리더보드(계좌 10만 달러 이상) 주소
   2) 실시간 체결(웹소켓 trades)에 찍힌 지갑 주소
+  3) 리더보드 계좌의 서브계정(리더보드에 안 나옴), 볼트(HLP 하위 볼트 포함)
 를 모아 두고(actions/cache 로 실행 간 유지), 매 실행마다 포지션을 다시 읽어 청산가를 가격대별로 합친다.
 커버리지 = 읽은 포지션 크기 합 / 거래소 전체 OI. 실행이 쌓일수록 주소가 늘어 커버리지가 오른다.
 
@@ -15,6 +16,8 @@ import aiohttp
 API = "https://api.hyperliquid.xyz/info"
 WS = "wss://api.hyperliquid.xyz/ws"
 LB = "https://stats-data.hyperliquid.xyz/Mainnet/leaderboard"
+VAULTS = "https://stats-data.hyperliquid.xyz/Mainnet/vaults"
+WS_COINS = 40       # 웹소켓 체결 구독 코인 수(거래대금 상위) — 다른 코인 거래자도 BTC를 들고 있을 수 있음
 COINS = ["BTC", "ETH", "SOL", "HYPE"]
 RANGE = 0.25      # 현재가 ±25%
 STEP = 0.005      # 0.5% 구간
@@ -41,15 +44,15 @@ async def post(s, body, tries=5):
     return None
 
 
-async def discover_ws(seconds):
+async def discover_ws(seconds, coins=COINS, users=None):
     """웹소켓 trades 로 활동 중인 지갑 주소 수집"""
-    users = set()
+    users = set() if users is None else users
     if seconds <= 0:
         return users
     try:
         async with aiohttp.ClientSession() as s:
             async with s.ws_connect(WS, heartbeat=20) as ws:
-                for c in COINS:
+                for c in coins:
                     await ws.send_json({"method": "subscribe", "subscription": {"type": "trades", "coin": c}})
                 end = time.time() + seconds
                 while time.time() < end:
@@ -72,14 +75,60 @@ async def discover_ws(seconds):
 
 
 async def leaderboard(s, min_value):
+    """[(주소, 계좌가치)]"""
     try:
         async with s.get(LB, timeout=aiohttp.ClientTimeout(total=120)) as r:
             d = await r.json(content_type=None)
-        return [x["ethAddress"].lower() for x in d.get("leaderboardRows", [])
+        return [(x["ethAddress"].lower(), float(x.get("accountValue") or 0)) for x in d.get("leaderboardRows", [])
                 if float(x.get("accountValue") or 0) >= min_value]
     except Exception as e:
         print("리더보드 오류:", e)
         return []
+
+
+async def vaults(s, min_tvl):
+    """TVL 기준 볼트 주소 + 부모 볼트의 하위 볼트 주소"""
+    out = set()
+    try:
+        async with s.get(VAULTS, timeout=aiohttp.ClientTimeout(total=120)) as r:
+            d = await r.json(content_type=None)
+        for v in d:
+            sm = v.get("summary", {})
+            if sm.get("isClosed"):
+                continue
+            rel = sm.get("relationship") or {}
+            if rel.get("type") == "parent":
+                out.update(x.lower() for x in rel.get("data", {}).get("childAddresses", []))
+            if float(sm.get("tvl") or 0) >= min_tvl:
+                out.add(sm["vaultAddress"].lower())
+    except Exception as e:
+        print("볼트 오류:", e)
+    return out
+
+
+async def scan_subs(s, masters, budget_s, conc):
+    """마스터 계좌의 서브계정 → {서브주소: clearinghouseState} (응답에 상태가 같이 옴)"""
+    sem = asyncio.Semaphore(conc)
+    out, done = {}, []
+    t_end = time.time() + budget_s
+
+    async def one(m):
+        if time.time() > t_end:
+            return
+        async with sem:
+            if time.time() > t_end:
+                return
+            r = await post(s, {"type": "subAccounts", "user": m})
+            if r is None:
+                return
+            done.append(m)
+            for x in r or []:
+                u = (x.get("subAccountUser") or "").lower()
+                if u:
+                    out[u] = x.get("clearinghouseState") or {}
+
+    await asyncio.gather(*[one(m) for m in masters])
+    return out, done
 
 
 async def scan(s, addrs, budget_s, conc):
@@ -178,7 +227,9 @@ async def main():
     ap.add_argument("--ws", type=int, default=240, help="웹소켓 주소 수집 초")
     ap.add_argument("--budget", type=int, default=900, help="포지션 조회 시간 예산 초")
     ap.add_argument("--conc", type=int, default=8)
-    ap.add_argument("--min-value", type=float, default=100_000)
+    ap.add_argument("--min-value", type=float, default=10_000)
+    ap.add_argument("--sub-budget", type=int, default=240, help="서브계정 탐색 시간 예산 초")
+    ap.add_argument("--vault-tvl", type=float, default=10_000)
     a = ap.parse_args()
 
     t0 = now()
@@ -192,20 +243,41 @@ async def main():
 
     async with aiohttp.ClientSession() as s:
         # 리더보드는 하루 1번 갱신
-        if t0 - st.get("lb_at", 0) > 86400 or not addrs:
-            for x in await leaderboard(s, a.min_value):
+        masters = st.setdefault("masters", {})   # 리더보드 주소 -> [계좌가치, 서브계정 확인 ts]
+        if t0 - st.get("lb_at", 0) > 86400 or not addrs or a.min_value < st.get("lb_min", 1e18):
+            for x, av in await leaderboard(s, a.min_value):
+                addrs.setdefault(x, [0, 1])
+                masters[x] = [av, masters.get(x, [0, 0])[1]]
+            for x in await vaults(s, a.vault_tvl):
                 addrs.setdefault(x, [0, 1])
             st["lb_at"] = t0
-        ws_users, meta = await asyncio.gather(
-            discover_ws(a.ws), post(s, {"type": "metaAndAssetCtxs"}))
+            st["lb_min"] = a.min_value
+        meta = await post(s, {"type": "metaAndAssetCtxs"})
+        uni = [x["name"] for x in meta[0]["universe"]]
+        # 웹소켓은 조회하는 동안 내내 백그라운드로 (거래대금 상위 코인)
+        vol = sorted(((float(meta[1][i].get("dayNtlVlm") or 0), u) for i, u in enumerate(uni)), reverse=True)
+        ws_coins = list(dict.fromkeys(COINS + [u for _, u in vol[:WS_COINS]]))
+        ws_users = set()
+        ws_task = asyncio.create_task(discover_ws(a.ws + a.sub_budget + a.budget, ws_coins, ws_users))
+
+        # 서브계정: 계좌가치 큰 순, 3일 안에 확인한 마스터는 건너뜀
+        todo = [m for m, v in sorted(masters.items(), key=lambda kv: -kv[1][0]) if t0 - v[1] > 3 * 86400]
+        sub_states, done = await scan_subs(s, todo, a.sub_budget, a.conc)
+        for m in done:
+            masters[m][1] = t0
+        for u in sub_states:
+            addrs.setdefault(u, [0, 1])
+        print(f"서브계정 확인 마스터 {len(done)}/{len(todo)} · 서브계정 {len(sub_states)}")
+
+        # 웹소켓 몇 분 모은 뒤 조회 시작 (조회 중 새로 잡힌 주소는 다음 실행에)
+        await asyncio.sleep(max(0, a.ws - a.sub_budget))
         new = 0
-        for u in ws_users:
+        for u in list(ws_users):
             if u not in addrs:
                 addrs[u] = [0, 1]
                 new += 1
-        print(f"주소 {len(addrs)} (웹소켓 신규 {new} / 수집 {len(ws_users)})")
+        print(f"주소 {len(addrs)} (웹소켓 신규 {new} / 수집 {len(ws_users)} · 코인 {len(ws_coins)})")
 
-        uni = [x["name"] for x in meta[0]["universe"]]
         ctx = {}
         for c in COINS:
             i = uni.index(c)
@@ -216,8 +288,20 @@ async def main():
         items = list(addrs.items())
         random.shuffle(items)
         items.sort(key=lambda kv: (0 if kv[1][1] else 1, kv[1][0]))
-        order = [k for k, _ in items]
+        order = [k for k, _ in items if k not in sub_states]
         states = await scan(s, order, a.budget, a.conc)
+        states.update(sub_states)
+        ws_task.cancel()
+        try:
+            await ws_task
+        except BaseException:
+            pass
+        late = 0
+        for u in list(ws_users):
+            if u not in addrs:
+                addrs[u] = [0, 1]
+                late += 1
+        print(f"조회 중 웹소켓 신규 {late}")
 
     for k, v in states.items():
         has = any(float(p["position"].get("szi") or 0) != 0 for p in v.get("assetPositions", []))
