@@ -1,0 +1,102 @@
+<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>청산 지도</title><link rel="stylesheet" href="common.css"></head><body><div class="wrap">
+<div class="top" id="top"></div>
+<h1><span id="ttl">BTC 청산 지도</span> <small id="ts"></small></h1>
+<div class="row">
+  <div class="seg" id="coin"><button class="on">BTC</button><button>ETH</button><button>SOL</button><button>HYPE</button></div>
+  <div class="seg" id="rng"><button data-r="10">±10%</button><button data-r="20" class="on">±20%</button><button data-r="25">±25%</button></div>
+</div>
+<div class="kpis" id="kpis"></div>
+<div class="panel"><div class="ph"><b>가격대별 청산가</b><span id="n1"></span></div><canvas id="c1"></canvas>
+  <div class="legend"><span><i style="background:#3b82f6"></i>롱 청산 (아래)</span><span><i style="background:#f0506e"></i>숏 청산 (위)</span><span><i style="background:#facc15"></i>지금 가격</span></div></div>
+<div class="panel"><div class="ph"><b>지금 가격부터 그 가격까지의 합</b><span>선 = 그 사이에 청산가가 있는 포지션 금액(달러)</span></div><canvas id="c2"></canvas></div>
+<div class="panel"><div class="ph"><b>대형 포지션</b><span>200만 달러 이상 · 청산가 가까운 순 · <span class="tag">신규</span> = 24시간 안에 처음 잡힘</span></div>
+  <div style="overflow-x:auto"><table id="big"></table></div></div>
+<div class="foot" id="foot"></div>
+</div>
+<script src="common.js"></script>
+<script>
+topbar('liq.html');
+let J = null, coin = 'BTC', R = 20;
+const $ = id => document.getElementById(id);
+function agg(c){ // 0.5% 구간 그대로, 범위만 자름
+  const n = c.long.length, mid = n / 2, k = Math.round(R / 100 / J.step);
+  const sl = (a) => a.slice(mid - k, mid + k);
+  return {edges: c.edges.slice(mid - k, mid + k + 1), long: sl(c.long), short: sl(c.short), k};
+}
+function render(){
+  const c = J.coins[coin]; if (!c) return;
+  const A = agg(c), px = c.price, n = A.long.length;
+  $('ttl').textContent = coin + ' 청산 지도';
+  $('ts').textContent = '· ' + fKst(J.updated * 1000) + ' · Hyperliquid';
+  const sumL = A.long.reduce((a, b) => a + b, 0), sumS = A.short.reduce((a, b) => a + b, 0);
+  const totL = c.liq_long_usd, totS = c.liq_short_usd;
+  $('kpis').innerHTML =
+    `<div class="kpi"><div class="l">지금</div><div class="v yl">${fpx(px)}</div><div class="s">OI ${nf(c.oi, coin==='BTC'?0:0)} ${coin} · ${usdKo(c.oi_usd)} 달러</div></div>` +
+    `<div class="kpi"><div class="l">아래 ${R}% 안 롱 청산가</div><div class="v bl">${usdKo(sumL)} 달러</div><div class="s">전체 롱 청산가의 ${nf(sumL/totL*100,0)}%</div></div>` +
+    `<div class="kpi"><div class="l">위 ${R}% 안 숏 청산가</div><div class="v dn">${usdKo(sumS)} 달러</div><div class="s">전체 숏 청산가의 ${nf(sumS/totS*100,0)}%</div></div>` +
+    `<div class="kpi"><div class="l">반영 비율 (OI 대비)</div><div class="v">${nf(c.cov_long*100,0)}% · ${nf(c.cov_short*100,0)}%</div><div class="s">롱 · 숏 · 포지션 ${nf(c.positions)}개</div></div>`;
+  $('n1').textContent = `막대 = 0.5% 구간의 포지션 금액(달러) · 전체 롱의 ${nf(c.cov_long*100,0)}% · 숏의 ${nf(c.cov_short*100,0)}% 반영`;
+  // ---- 막대
+  const cv = $('c1'), {g, w, h} = setupCanvas(cv, innerWidth < 600 ? 250 : 300);
+  const pad = {l: 8, r: 50, t: 28, b: 34}, pw = w - pad.l - pad.r, ph = h - pad.t - pad.b;
+  const vals = A.long.map((v, i) => v + A.short[i]); const mx = Math.max(...vals, 1) * 1.1;
+  const bx = i => pad.l + i * pw / n, bw = pw / n;
+  const ys = v => pad.t + ph - v / mx * ph;
+  g.strokeStyle = C.grid; g.fillStyle = C.axis; g.textBaseline = 'middle';
+  for (const t of niceTicks(0, mx, 3)) { if (!t) continue; const y = ys(t); g.beginPath(); g.moveTo(pad.l, y); g.lineTo(w - pad.r, y); g.stroke(); g.fillText(usdKo(t), w - pad.r + 5, y); }
+  for (let i = 0; i < n; i++) {
+    if (A.long[i]) { g.fillStyle = C.blue; const y = ys(A.long[i]); g.fillRect(bx(i) + .5, y, Math.max(1, bw - 1), pad.t + ph - y); }
+    if (A.short[i]) { g.fillStyle = C.red; const y = ys(A.short[i]); g.fillRect(bx(i) + .5, y, Math.max(1, bw - 1), pad.t + ph - y); }
+  }
+  const xPx = p => pad.l + (p - A.edges[0]) / (A.edges[n] - A.edges[0]) * pw;
+  g.strokeStyle = C.yellow; g.setLineDash([4, 4]); g.beginPath(); g.moveTo(xPx(px), pad.t - 6); g.lineTo(xPx(px), pad.t + ph); g.stroke(); g.setLineDash([]);
+  // 가장 큰 구간 라벨
+  const top = (arr, col) => { let bi = -1, bv = 0; arr.forEach((v, i) => { if (v > bv) { bv = v; bi = i; } }); if (bi < 0) return;
+    const t = `${fpx(A.edges[bi])}~${fpx(A.edges[bi+1])} · ${usdKo(bv)}`; g.font = '11px sans-serif'; const tw = g.measureText(t).width;
+    let x = bx(bi) + bw/2 - tw/2; x = Math.max(pad.l, Math.min(x, w - pad.r - tw)); g.fillStyle = col; g.textBaseline = 'bottom'; g.fillText(t, x, ys(bv) - 4); };
+  top(A.long, '#93b8ff'); top(A.short, '#ff9fb2');
+  // x축: 5% 마다
+  g.textBaseline = 'top'; g.fillStyle = C.axis;
+  const stepPct = R <= 10 ? 2.5 : 5;
+  for (let p = -R; p <= R; p += stepPct) { if (p === 0) continue; const pr = px * (1 + p / 100), x = xPx(pr);
+    const t1 = fpx(pr), t2 = (p > 0 ? '+' : '') + p + '%'; const tw = Math.max(g.measureText(t1).width, g.measureText(t2).width); if (x - tw/2 < 0 || x + tw/2 > w - 4) continue;
+    if (innerWidth < 600 && Math.abs(p) % 10) continue;
+    g.fillText(t1, x - g.measureText(t1).width/2, pad.t + ph + 4); g.fillStyle = p < 0 ? '#6f8fc9' : '#c9798a'; g.fillText(t2, x - g.measureText(t2).width/2, pad.t + ph + 18); g.fillStyle = C.axis; }
+  pillAt(g, xPx(px), pad.t - 14, '지금 ' + fpx(px), C.yellow, '#0b0f17', 'center');
+  // ---- 누적
+  const cv2 = $('c2'), S2 = setupCanvas(cv2, 190), g2 = S2.g;
+  const k = A.k, cumL = new Array(n).fill(null), cumS = new Array(n).fill(null);
+  let s = 0; for (let i = k - 1; i >= 0; i--) { s += A.long[i]; cumL[i] = s; }
+  s = 0; for (let i = k; i < n; i++) { s += A.short[i]; cumS[i] = s; }
+  const m2 = Math.max(cumL[0] || 0, cumS[n-1] || 0, 1) * 1.15, ph2 = 190 - pad.t - 24;
+  const y2 = v => pad.t + ph2 - v / m2 * ph2;
+  g2.strokeStyle = C.grid; g2.fillStyle = C.axis; g2.textBaseline = 'middle';
+  for (const t of niceTicks(0, m2, 3)) { if (!t) continue; const y = y2(t); g2.beginPath(); g2.moveTo(pad.l, y); g2.lineTo(w - pad.r, y); g2.stroke(); g2.fillText(usdKo(t), w - pad.r + 5, y); }
+  const area = (arr, col, from, to, dir) => { g2.beginPath(); const base = y2(0); const xc = i => bx(i) + (dir < 0 ? 0 : bw);
+    g2.moveTo(xPx(px), base); for (let i = from; dir < 0 ? i >= to : i <= to; i += dir) g2.lineTo(xc(i), y2(arr[i])); g2.lineTo(xc(to), base); g2.closePath();
+    g2.fillStyle = col + '40'; g2.fill(); g2.beginPath(); g2.moveTo(xPx(px), base); for (let i = from; dir < 0 ? i >= to : i <= to; i += dir) g2.lineTo(xc(i), y2(arr[i])); g2.strokeStyle = col; g2.lineWidth = 1.6; g2.stroke(); };
+  area(cumL, C.blue, k - 1, 0, -1); area(cumS, C.red, k, n - 1, 1);
+  g2.strokeStyle = C.yellow; g2.setLineDash([4,4]); g2.beginPath(); g2.moveTo(xPx(px), pad.t - 10); g2.lineTo(xPx(px), pad.t + ph2); g2.stroke(); g2.setLineDash([]);
+  const half = Math.round(k / 2);
+  const dot = (i, v, col, t, al) => { const x = bx(i) + (al === 'L' ? 0 : bw); g2.fillStyle = col; g2.beginPath(); g2.arc(x, y2(v), 3, 0, 7); g2.fill(); g2.textBaseline = 'bottom'; const tw = g2.measureText(t).width; g2.fillText(t, Math.max(pad.l, Math.min(x - tw/2, w - pad.r - tw)), y2(v) - 5); };
+  dot(k - half, cumL[k - half], '#93b8ff', `${R/2}%까지 ${usdKo(cumL[k-half])}`, 'L');
+  dot(k + half - 1, cumS[k + half - 1], '#ff9fb2', `${R/2}%까지 ${usdKo(cumS[k+half-1])}`, 'R');
+  g2.font = 'bold 11px sans-serif'; g2.textBaseline = 'top';
+  g2.fillStyle = '#93b8ff'; g2.fillText(`${R}%까지 롱 ${usdKo(cumL[0])} 달러 (전체 롱의 ${nf(cumL[0]/totL*100,0)}%)`, pad.l + 2, 4);
+  const tS = `${R}%까지 숏 ${usdKo(cumS[n-1])} 달러 (전체 숏의 ${nf(cumS[n-1]/totS*100,0)}%)`; g2.fillStyle = '#ff9fb2';
+  if (innerWidth < 600) g2.fillText(tS, pad.l + 2, 18); else g2.fillText(tS, w - pad.r - g2.measureText(tS).width, 4);
+  g2.font = '11px sans-serif'; g2.fillStyle = C.axis; g2.textBaseline = 'top';
+  for (const p of [-R, -R/2, R/2, R]) { const x = xPx(px * (1 + p/100)), t = (p>0?'+':'') + p + '%'; g2.fillText(t, x - g2.measureText(t).width/2, pad.t + ph2 + 6); }
+  // ---- 대형 포지션
+  const now = J.updated, rows = c.big.filter(b => b.liq).map(b => ({...b, dist: (b.liq / px - 1) * 100})).sort((a, b) => Math.abs(a.dist) - Math.abs(b.dist)).slice(0, 25);
+  $('big').innerHTML = `<tr><th>방향</th><th>규모</th><th>${coin}</th><th>평단</th><th>청산가</th><th>거리</th><th>레버리지</th><th>미실현</th><th>지갑</th></tr>` +
+    rows.map(b => `<tr><td class="${b.side==='롱'?'bl':'dn'}">${b.side}${now - b.first < 86400 ? '<span class="tag">신규</span>' : ''}</td><td>${usdM(b.usd)}</td><td>${nf(b.size, b.size >= 100 ? 0 : 2)}</td><td>${fpx(b.entry)}</td><td>${fpx(b.liq)}</td><td class="${b.dist<0?'bl':'dn'}">${sgn(b.dist,1)}%</td><td>${b.lev ? b.lev + '배' : '–'}${b.mode==='isolated'?' 격리':''}</td><td class="${b.upnl>=0?'up':'dn'}">${usdM(b.upnl)}</td><td><a href="https://app.hyperliquid.xyz/explorer/address/${b.addr}" target="_blank">${b.addr.slice(0,6)}…${b.addr.slice(-4)}</a></td></tr>`).join('');
+  $('foot').innerHTML = `출처 Hyperliquid 온체인 포지션 (공개 청산가). 리더보드·실시간 체결에서 모은 지갑 ${nf(J.addresses)}개 중 이번 실행에서 ${nf(J.scanned)}개 조회(+최근 6시간 캐시 ${nf(J.reused)}개). 30분마다 갱신(GitHub 예약 지연 가능).<br>바이낸스·바이비트 등 중앙거래소는 개별 청산가가 공개되지 않아 포함하지 않음. 반영 비율 = 읽은 포지션 크기 ÷ 하이퍼리퀴드 전체 OI.`;
+}
+function bind(id, f){ $(id).onclick = e => { const b = e.target.closest('button'); if (!b) return; for (const x of $(id).children) x.classList.toggle('on', x === b); f(b); render(); }; }
+bind('coin', b => coin = b.textContent); bind('rng', b => R = +b.dataset.r);
+addEventListener('resize', () => J && render());
+async function go(){ try { J = await loadLiq(); render(); } catch (e) { $('kpis').innerHTML = '<div class="err">데이터 불러오기 실패: ' + e.message + '</div>'; } }
+go(); setInterval(go, 5 * 60e3);
+</script></body></html>

@@ -1,0 +1,96 @@
+<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>스테이블코인 공급량</title><link rel="stylesheet" href="common.css"></head><body><div class="wrap">
+<div class="top" id="top"></div>
+<h1>$ 스테이블코인 공급량 <small id="ts"></small></h1>
+<div class="row"><div class="seg" id="view"><button data-v="y" class="on">최근 1년</button><button data-v="all">전체 기간</button></div></div>
+<div class="kpis" id="kpis"></div>
+<div id="brief" class="status"></div>
+<div id="vy">
+  <div class="panel"><div class="ph"><b>총공급 (억 달러) · 최근 1년</b><span id="yr"></span></div><canvas id="c1"></canvas></div>
+  <div class="panel"><div class="ph"><b>하루 변화 (억 달러)</b><span>최근 1년</span></div><canvas id="c2"></canvas></div>
+  <div class="panel"><div class="ph"><b>30일 변화 (억 달러)</b><span>그날까지 30일 동안 늘어난−줄어든 양</span></div><canvas id="c3"></canvas></div>
+  <div class="legend"><span><i style="background:#2dd4bf"></i>늘어남</span><span><i style="background:#f59e0b"></i>줄어듦</span><span><i style="background:#e5e7eb;height:2px"></i>총공급</span></div>
+</div>
+<div id="vall" style="display:none">
+  <div class="panel"><div class="ph"><b>전체 기간 (억 달러) · 2020년부터</b><span id="an"></span></div><canvas id="a1"></canvas></div>
+  <div class="panel"><div class="ph"><b>최근 6개월 (억 달러)</b><span id="sn"></span></div><canvas id="a2"></canvas></div>
+  <div class="panel"><div class="ph"><b>최근 1개월 (억 달러)</b><span id="mn"></span></div><canvas id="a3"></canvas></div>
+  <div class="legend"><span><i style="background:#e5e7eb;height:2px"></i>총공급</span><span><i style="background:rgba(148,163,184,.3)"></i>아래 그림의 기간</span></div>
+</div>
+<div class="foot">자료 DefiLlama (stablecoins.llama.fi) · 모든 달러 페그 스테이블코인 유통량 합계, 하루 1번 집계 · 백분위 = 최근 1년 동안의 같은 기간 변화 중 순위</div>
+</div>
+<script src="common.js"></script>
+<script>
+topbar('stable.html');
+const E = v => v / 1e8; // 억 달러
+let D = null;
+function pct(arr, v){ const s = arr.filter(x => x != null); return s.filter(x => x <= v).length / s.length; }
+function rankTxt(p){ return p <= .1 ? '하위 10%' : p <= .25 ? '하위 25%' : p >= .9 ? '상위 10%' : p >= .75 ? '상위 25%' : '중간'; }
+async function load(){
+  const d = await getJSON('https://stablecoins.llama.fi/stablecoincharts/all');
+  const t = d.map(x => +x.date * 1000), v = d.map(x => +((x.totalCirculatingUSD || {}).peggedUSD || 0));
+  // 마지막 날이 중복/0 이면 제거
+  while (v.length && !v[v.length-1]) { v.pop(); t.pop(); }
+  D = {t, v}; render();
+}
+function chg(n){ const v = D.v, L = v.length - 1; return v[L] - v[L - n]; }
+function render(){
+  const {t, v} = D, L = v.length - 1, cur = v[L];
+  document.getElementById('ts').textContent = '· ' + fKst(t[L], 'mdw') + ' 기록';
+  const y0 = Math.max(0, L - 365);
+  const yr = v.slice(y0), yrMax = Math.max(...yr), yrMin = Math.min(...yr);
+  const iMax = y0 + yr.indexOf(yrMax), iMin = y0 + yr.indexOf(yrMin);
+  const ath = Math.max(...v), iAth = v.indexOf(ath);
+  const d7 = [], d30 = [];
+  for (let i = y0; i <= L; i++) { d7.push(v[i] - v[i-7]); d30.push(v[i] - v[i-30]); }
+  const c1 = chg(1), c7 = chg(7), c30 = chg(30), c180 = chg(180), c365 = chg(365);
+  const p7 = pct(d7, c7), p30 = pct(d30, c30);
+  const k = (l, val, s, cls = '') => `<div class="kpi"><div class="l">${l}</div><div class="v ${cls}">${val}</div><div class="s">${s || ''}</div></div>`;
+  const cl = x => x >= 0 ? 'up' : 'dn';
+  document.getElementById('kpis').innerHTML =
+    k('총공급', nf(E(cur), 0) + '억 달러', '역대 최고보다 ' + sgn((cur/ath - 1) * 100, 1) + '%') +
+    k('하루', sgn(E(c1), 1) + '억', sgn(c1 / v[L-1] * 100, 2) + '%', cl(c1)) +
+    k('7일', sgn(E(c7), 1) + '억', sgn(c7 / v[L-7] * 100, 1) + '% · ' + rankTxt(p7), cl(c7)) +
+    k('30일', sgn(E(c30), 0) + '억', sgn(c30 / v[L-30] * 100, 1) + '% · ' + rankTxt(p30), cl(c30)) +
+    k('6개월', sgn(E(c180), 0) + '억', sgn(c180 / v[L-180] * 100, 1) + '%', cl(c180)) +
+    k('1년', sgn(E(c365), 0) + '억', sgn(c365 / v[L-365] * 100, 1) + '%', cl(c365));
+  const pos = (cur - yrMin) / (yrMax - yrMin);
+  document.getElementById('brief').innerHTML =
+    `7일 ${sgn(E(c7),1)}억 달러 · 1년 동안의 7일 변화 중 <b>${rankTxt(p7)}</b> &nbsp;|&nbsp; 30일 ${sgn(E(c30),0)}억 달러 · <b>${rankTxt(p30)}</b><br>` +
+    `1년 범위 ${nf(E(yrMin),0)}~${nf(E(yrMax),0)}억 달러 · 지금은 ${pos < .03 ? '<b class="dn">1년 중 최저</b>' : pos > .97 ? '<b class="up">1년 중 최고</b>' : '범위의 ' + nf(pos*100,0) + '% 지점'} · 최고 ${nf(E(yrMax),0)}억(${fKst(t[iMax],'md')}) 대비 ${sgn((cur/yrMax-1)*100,1)}%`;
+  document.getElementById('yr').textContent = `1년 범위 ${nf(E(yrMin),0)}~${nf(E(yrMax),0)}억 달러`;
+  const monthLabels = (i0, i1, step = 1) => { const out = []; let last = -1; for (let i = i0; i <= i1; i++) { const d = kst(t[i]); const m = d.getUTCMonth(); if (m !== last && d.getUTCDate() <= 3) { out.push([i - i0, m === 0 ? d.getUTCFullYear() + '' : (m+1) + '월']); last = m; } } return out.filter((_, k) => k % step === 0); };
+  if (!document.getElementById('vy').style.display) {
+    const ys = v.slice(y0).map(E), xl = monthLabels(y0, L, innerWidth < 600 ? 2 : 1);
+    tsChart(document.getElementById('c1'), {x: ys, height: 210, series: [{y: ys, type: 'area', color: C.white}], xlabels: xl,
+      labels: [{i: iMax - y0, v: E(yrMax), text: `1년 최고 ${nf(E(yrMax),0)} · ${fKst(t[iMax],'md')}`, dot: 1, color: C.mute}, {i: iMin - y0, v: E(yrMin), text: `1년 최저 ${nf(E(yrMin),0)} · ${fKst(t[iMin],'md')}`, dot: 1, color: C.orange}],
+      endPill: {v: E(cur), text: nf(E(cur), 0)}, yfmt: x => nf(x, 0)});
+    const dd = []; for (let i = y0; i <= L; i++) dd.push(E(v[i] - v[i-1]));
+    tsChart(document.getElementById('c2'), {x: dd, height: 140, zero: 1, series: [{y: dd, type: 'bar'}], xlabels: xl, endPill: {v: dd[dd.length-1], text: sgn(dd[dd.length-1], 1), bg: dd[dd.length-1] >= 0 ? C.teal : C.orange}, yfmt: x => nf(x, 0)});
+    const m30 = d30.map(E);
+    tsChart(document.getElementById('c3'), {x: m30, height: 150, zero: 1, series: [{y: m30, type: 'area', color: C.teal, neg: C.orange, pill: false}], xlabels: xl, endPill: {v: m30[m30.length-1], text: sgn(m30[m30.length-1], 0), bg: m30[m30.length-1] >= 0 ? C.teal : C.orange}, yfmt: x => nf(x, 0)});
+  } else {
+    const a0 = t.findIndex(x => x >= Date.UTC(2020, 0, 1));
+    const all = v.slice(a0).map(E);
+    const yl = []; let ly = -1; for (let i = a0; i <= L; i++) { const y = kst(t[i]).getUTCFullYear(); if (y !== ly) { yl.push([i - a0, y + '']); ly = y; } }
+    document.getElementById('an').textContent = `역대 최고보다 ${sgn((cur/ath-1)*100,1)}% · 음영 = 최근 6개월`;
+    tsChart(document.getElementById('a1'), {x: all, height: 200, series: [{y: all, type: 'area', color: C.white}], xlabels: yl.slice(1), yMin: 0, shade: [L - 180 - a0, L - a0],
+      labels: [{i: iAth - a0, v: E(ath), text: `역대 최고 ${nf(E(ath),0)} · ${fKst(t[iAth],'md')}`, dot: 1}], endPill: {v: E(cur), text: nf(E(cur),0)}, yfmt: x => nf(x, 0)});
+    const s0 = L - 180, six = v.slice(s0).map(E);
+    document.getElementById('sn').textContent = `6개월 ${sgn(E(c180),0)}억 달러(${sgn(c180/v[s0]*100,1)}%) · 음영 = 최근 1개월`;
+    tsChart(document.getElementById('a2'), {x: six, height: 170, series: [{y: six, type: 'area', color: C.white}], xlabels: monthLabels(s0, L), shade: [150, 180],
+      labels: [{i: 0, v: six[0], text: `${fKst(t[s0],'md')} ${nf(six[0],0)}`, dot: 1}], endPill: {v: E(cur), text: nf(E(cur),0)}, yfmt: x => nf(x, 0)});
+    const m0 = L - 30, mon = v.slice(m0).map(E);
+    document.getElementById('mn').textContent = `30일 ${sgn(E(c30),0)}억 달러(${sgn(c30/v[m0]*100,1)}%)`;
+    const wl = []; for (let i = 0; i <= 30; i += 7) wl.push([i, fKst(t[m0 + i], 'md')]);
+    tsChart(document.getElementById('a3'), {x: mon, height: 160, series: [{y: mon, type: 'area', color: C.white}], xlabels: wl,
+      labels: [{i: 0, v: mon[0], text: `${fKst(t[m0],'md')} ${nf(mon[0],0)}`, dot: 1}], endPill: {v: E(cur), text: nf(E(cur),0)}, yfmt: x => nf(x, 0)});
+  }
+}
+document.getElementById('view').onclick = e => { const b = e.target.closest('button'); if (!b) return;
+  for (const x of e.currentTarget.children) x.classList.toggle('on', x === b);
+  document.getElementById('vy').style.display = b.dataset.v === 'y' ? '' : 'none';
+  document.getElementById('vall').style.display = b.dataset.v === 'y' ? 'none' : ''; if (D) render(); };
+addEventListener('resize', () => D && render());
+load().catch(e => document.getElementById('brief').innerHTML = '<span class="err">불러오기 실패: ' + e.message + '</span>');
+</script></body></html>

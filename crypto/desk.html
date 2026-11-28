@@ -1,0 +1,244 @@
+<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>분석 데스크</title><link rel="stylesheet" href="common.css">
+<style>#main{touch-action:pan-y}.hd{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin:2px 0 8px}.hd .p{font-size:22px;font-weight:700;font-variant-numeric:tabular-nums}.hd .t{margin-left:auto;font-size:12px;color:var(--mute)}</style></head><body><div class="wrap">
+<div class="top" id="top"></div>
+<div class="hd"><b id="sym" style="font-size:16px">BTC</b><span class="mu">Binance 선물</span><span class="p" id="px">–</span><span id="chg"></span><span class="t" id="now"></span></div>
+<div class="row" id="pills"></div>
+<div class="row">
+  <div class="seg" id="coin"><button class="on">BTC</button><button>ETH</button><button>SOL</button></div>
+  <div class="seg" id="tf"><button data-v="15m">15분</button><button data-v="1h" class="on">1시간</button><button data-v="4h">4시간</button></div>
+  <div class="seg" id="nb"><button data-v="72">72봉</button><button data-v="120" class="on">120봉</button><button data-v="200">200봉</button></div>
+  <div class="seg" id="lq"><button class="on" data-v="1">청산 지도</button><button data-v="0">끄기</button></div>
+</div>
+<div class="panel"><div class="ph"><b id="mt">BTCUSDT 선물 · 1시간봉</b><span id="ohlc"></span></div><canvas id="main"></canvas>
+  <div class="legend"><span><i style="background:#f0506e66;border:1px solid #f0506e"></i>저항 구간</span><span><i style="background:#3b82f666;border:1px solid #3b82f6"></i>지지 구간</span><span><i style="background:#a78bfa55;border:1px solid #a78bfa"></i>FVG</span><span>오른쪽 막대 = 가격대별 거래량</span><span id="lqleg"></span></div></div>
+<div class="panel"><div class="ph"><b>CVD · 보이는 구간 누적 (<span class="cu">BTC</span>)</b><span id="cvdv"></span></div><canvas id="cvd"></canvas>
+  <div class="legend"><span><i style="background:#3b82f6;height:2px"></i>선물 (Binance)</span><span><i style="background:#facc15;height:2px"></i>현물 (Binance)</span></div></div>
+<div class="panel"><div class="ph"><b>OI 변화 추정 · Binance · 보이는 구간 합 (<span class="cu">BTC</span>)</b><span id="oiv"></span></div><canvas id="oi"></canvas>
+  <div class="legend"><span><i style="background:#22c55e"></i>신규 롱</span><span><i style="background:#f0506e"></i>신규 숏</span><span><i style="background:#22c55e55"></i>롱 정리</span><span><i style="background:#f0506e55"></i>숏 정리</span><span><i style="background:#e5e7eb;height:2px"></i>OI</span></div></div>
+<div class="panel"><div class="ph"><b class="yl">구간 요약</b><div class="seg" id="win"><button data-v="60">1시간</button><button data-v="240" class="on">4시간</button><button data-v="540">9시간</button><button data-v="1440">24시간</button></div></div>
+  <div id="sum">불러오는 중…</div></div>
+<div class="foot">가격·거래량·CVD·OI 변화: Binance 선물/현물 공개 API (브라우저에서 직접, 1분마다 갱신). 구간 요약 OI: Binance·Bybit 5분 이력 + Bitget·Hyperliquid 는 이 페이지가 열려 있는 동안 1분마다 기록한 값(이 기기에 저장). OKX는 브라우저 직접 호출(CORS)이 막혀 빠짐.
+신규 롱/숏·정리 구분은 추정: OI가 늘어난 5분 조각은 그 조각의 테이커 매수 비율만큼 신규 롱, 나머지 신규 숏 / 줄어든 조각은 매도 비율만큼 롱 정리, 나머지 숏 정리. 청산 지도는 하이퍼리퀴드 포지션(30분마다).</div>
+</div>
+<script src="common.js"></script>
+<script>
+topbar('desk.html');
+const $ = id => document.getElementById(id);
+const st = {coin: 'BTC', tf: '1h', nb: 120, liq: 1, win: 240, hover: null};
+let D = null, LIQ = null;
+const TFMS = {'15m': 9e5, '1h': 36e5, '4h': 144e5};
+
+async function load(){
+  const sym = st.coin + 'USDT';
+  const [k, ks, h4, d1, h1, oi, t24, f5, s5] = await Promise.all([
+    bnKlines(sym, st.tf, 400), bnKlines(sym, st.tf, 400, true).catch(() => []),
+    bnKlines(sym, '4h', 300), bnKlines(sym, '1d', 200), st.tf === '1h' ? null : bnKlines(sym, '1h', 300),
+    bnOIHist(sym, st.tf, 500).catch(() => []), getJSON(`${FAPI}/fapi/v1/ticker/24hr?symbol=${sym}`),
+    bnKlines(sym, '5m', 300), bnKlines(sym, '5m', 300, true).catch(() => [])]);
+  const H1 = h1 || k, price = k[k.length-1].c;
+  D = {k, ks, h4, d1, h1: H1, oi, t24, f5, s5, price, zones: srZones(d1, h4, H1, price),
+       fvg: [...fvgs(h4, '4H', 3), ...fvgs(d1, '1D', 3)], at: Date.now()};
+  render(); summary();
+}
+async function loadLiq(){ try { LIQ = await window.loadLiqJson(); } catch (e) { LIQ = null; } render(); }
+window.loadLiqJson = loadLiq0; async function loadLiq0(){ return getJSON(LIQ_URL + '?t=' + Math.floor(Date.now() / 120000)); }
+
+function pills(){
+  const a = volState(D.h4), b = volState(D.d1);
+  const p = (lab, v) => v ? `<span class="pill"><b>변동성 ${lab} ${v.lv}단계 ${v.rising ? '▲' : '▼'}</b> 평소의 ${nf(v.ratio,1)}배 · 평균 변동폭 ${nf(v.avg,1)}% · 지금까지 ${nf(v.now,1)}% · ${fKst(v.until,'hm')}까지</span>` : '';
+  $('pills').innerHTML = p('4시간', a) + p('1일', b);
+}
+function render(){
+  if (!D) return;
+  const {k, t24, price} = D;
+  $('sym').textContent = st.coin; document.querySelectorAll('.cu').forEach(e => e.textContent = st.coin);
+  $('px').textContent = fpx(price); const ch = +t24.priceChangePercent;
+  $('chg').innerHTML = `<span class="${ch>=0?'up':'dn'}">24시간 ${ch>=0?'▲':'▼'} ${nf(Math.abs(ch),1)}%</span>`;
+  $('now').textContent = fKst(D.at, 'date') + ' ' + fKst(D.at, 'hm');
+  $('mt').textContent = `${st.coin}USDT 선물 · ${{'15m':'15분봉','1h':'1시간봉','4h':'4시간봉'}[st.tf]}`;
+  pills();
+  const bars = k.slice(-st.nb), n = bars.length;
+  const hi = st.hover != null ? bars[st.hover] : bars[n-1];
+  $('ohlc').innerHTML = `${fKst(hi.t)} 시 ${fpx(hi.o)} 고 ${fpx(hi.h)} 저 ${fpx(hi.l)} 종 ${fpx(hi.c)} <span class="${hi.c>=hi.o?'up':'dn'}">${sgn((hi.c/hi.o-1)*100,2)}%</span> 거래량 ${nf(hi.v)} ${st.coin}`;
+  // ---- 메인
+  const cv = $('main'), mob = innerWidth < 600, H = mob ? 380 : 470, {g, w, h} = setupCanvas(cv, H);
+  const vpW = mob ? 44 : 70, pad = {l: 4, r: 58, t: 8, b: 22}, pw = w - pad.l - pad.r - vpW, ph = h - pad.t - pad.b;
+  let lo = Math.min(...bars.map(b => b.l)), hiP = Math.max(...bars.map(b => b.h)); const sp = hiP - lo; lo -= sp * .05; hiP += sp * .05;
+  const ys = v => pad.t + (hiP - v) / (hiP - lo) * ph, bw = pw / n, xs = i => pad.l + i * bw + bw / 2;
+  g.strokeStyle = C.grid; g.fillStyle = C.axis; g.textBaseline = 'middle';
+  for (const t of niceTicks(lo, hiP, 6)) { const y = ys(t); g.beginPath(); g.moveTo(pad.l, y); g.lineTo(w - pad.r, y); g.stroke(); g.fillText(fpx(t), w - pad.r + 5, y); }
+  // 존 (화면 안에 보이는 것만)
+  g.save(); g.beginPath(); g.rect(pad.l, pad.t, w - pad.r - pad.l, ph); g.clip();
+  const usedY = []; const zoneBox = (z, col, label, dash) => { const y1 = ys(z.hi), y2 = ys(z.lo); if (y2 < pad.t || y1 > pad.t + ph) return;
+    let x0 = pad.l; const fi = bars.findIndex(b => b.t >= z.t); if (fi > 0) x0 = xs(fi);
+    g.fillStyle = col + '22'; g.fillRect(x0, y1, pad.l + pw - x0, Math.max(2, y2 - y1)); g.strokeStyle = col + 'aa'; g.setLineDash(dash ? [3,3] : []); g.strokeRect(x0, y1, pad.l + pw - x0, Math.max(2, y2 - y1)); g.setLineDash([]);
+    g.font = '10.5px sans-serif'; g.fillStyle = col; g.textBaseline = 'bottom'; const tw = g.measureText(label).width; let ly = y1 - 1; while (usedY.some(u => Math.abs(u - ly) < 13)) ly += 13; usedY.push(ly); g.fillText(label, pad.l + pw - tw - 4, ly); };
+  for (const z of D.fvg) zoneBox(z, '#a78bfa', `${z.tf} FVG ${fpx(z.lo)}~${fpx(z.hi)}`, 1);
+  for (const z of D.zones) zoneBox(z, z.name[0] === 'R' ? C.red : C.blue, `${z.name}${z.star?'★':''} ${z.tfs} · ${fpx(z.lo)}~${fpx(z.hi)}`);
+  g.restore();
+  // 캔들
+  for (let i = 0; i < n; i++) { const b = bars[i], up = b.c >= b.o; g.strokeStyle = g.fillStyle = up ? '#d1d5db' : '#6b7280';
+    g.beginPath(); g.moveTo(xs(i), ys(b.h)); g.lineTo(xs(i), ys(b.l)); g.stroke();
+    const y1 = ys(Math.max(b.o, b.c)), y2 = ys(Math.min(b.o, b.c));
+    if (up) { g.fillStyle = '#0b0f17'; g.fillRect(xs(i) - bw*.36, y1, bw*.72, Math.max(1, y2 - y1)); g.strokeRect(xs(i) - bw*.36, y1, bw*.72, Math.max(1, y2 - y1)); }
+    else g.fillRect(xs(i) - bw*.36, y1, bw*.72, Math.max(1, y2 - y1)); }
+  // 매물대
+  const NB = 48, vp = new Array(NB).fill(0), bs = (hiP - lo) / NB;
+  for (const b of bars) { const a = Math.floor((b.l - lo) / bs), c = Math.floor((b.h - lo) / bs), m = Math.max(1, c - a + 1); for (let j = Math.max(0, a); j <= Math.min(NB-1, c); j++) vp[j] += b.v / m; }
+  const vmx = Math.max(...vp), vx0 = w - pad.r - 2;
+  vp.forEach((v, j) => { const y = ys(lo + (j + 1) * bs), hh = ph / NB - 1, len = v / vmx * (vpW - 6); g.fillStyle = (lo + (j + .5) * bs > price ? C.red : C.green) + '77'; g.fillRect(vx0 - len, y, len, hh); });
+  // 현재가
+  g.strokeStyle = C.yellow; g.setLineDash([2,3]); g.beginPath(); g.moveTo(pad.l, ys(price)); g.lineTo(w - pad.r, ys(price)); g.stroke(); g.setLineDash([]);
+  pillAt(g, w - pad.r + 1, ys(price), fpx(price), C.yellow);
+  // x축
+  g.fillStyle = C.axis; g.textBaseline = 'top'; let lx = -99;
+  for (let i = 0; i < n; i++) { const d = kst(bars[i].t), newDay = i > 0 && kst(bars[i-1].t).getUTCDate() !== d.getUTCDate();
+    if (!newDay) continue; const t = fKst(bars[i].t, 'md'); if (xs(i) - lx < 46) continue; g.fillText(t, xs(i) - 14, h - pad.b + 5); lx = xs(i); }
+  // 호버
+  if (st.hover != null) { g.strokeStyle = '#475569'; g.beginPath(); g.moveTo(xs(st.hover), pad.t); g.lineTo(xs(st.hover), pad.t + ph); g.stroke(); }
+  // 청산 지도 인셋
+  $('lqleg').textContent = '';
+  if (st.liq && LIQ && LIQ.coins[st.coin]) {
+    const L = LIQ.coins[st.coin], nn = L.long.length, mid = nn / 2, kk = 30; // ±15%
+    const lg = L.long.slice(mid - kk, mid + kk), sh = L.short.slice(mid - kk, mid + kk), ed = L.edges.slice(mid - kk, mid + kk + 1);
+    const iw = mob ? w * .62 : Math.min(360, w * .42), ih = mob ? 130 : 150, ix = pad.l + 6;
+    const early = bars.slice(0, Math.ceil(n * .55)), eMid = early.reduce((s, b) => s + b.c, 0) / early.length, iy = eMid > (lo + hiP) / 2 ? pad.t + ph - ih - 6 : pad.t + 6;
+    g.fillStyle = 'rgba(11,15,23,.92)'; roundRect(g, ix, iy, iw, ih, 8); g.fill(); g.strokeStyle = '#334155'; g.stroke();
+    g.fillStyle = C.yellow; g.font = 'bold 11px sans-serif'; g.textBaseline = 'top'; g.fillText(`청산 지도 · Hyperliquid · ${fKst(LIQ.updated*1000,'hm')}`, ix + 8, iy + 6);
+    g.font = '10px sans-serif'; g.fillStyle = C.green; g.fillText('■ 롱 청산', ix + 8, iy + 21); g.fillStyle = C.red; g.fillText('■ 숏 청산', ix + 64, iy + 21);
+    const bx0 = ix + 8, bpw = iw - 16, by1 = iy + ih - 18, bph = ih - 54, m = Math.max(...lg, ...sh, 1), bbw = bpw / lg.length;
+    for (let i = 0; i < lg.length; i++) { const v = lg[i] || sh[i]; if (!v) continue; const hh = v / m * bph; g.fillStyle = lg[i] ? C.green : C.red; g.fillRect(bx0 + i * bbw + .5, by1 - hh, Math.max(1, bbw - 1), hh); }
+    const xp = p => bx0 + (p - ed[0]) / (ed[ed.length-1] - ed[0]) * bpw;
+    g.strokeStyle = C.yellow; g.setLineDash([3,3]); g.beginPath(); g.moveTo(xp(L.price), by1 - bph - 4); g.lineTo(xp(L.price), by1); g.stroke(); g.setLineDash([]);
+    const tops = []; for (const t of [...lg.map((v, i) => [v, i, 'L']), ...sh.map((v, i) => [v, i, 'S'])].sort((a, b) => b[0] - a[0])) { if (tops.length >= 3) break; if (tops.every(u => Math.abs(u[1] - t[1]) > 6)) tops.push(t); }
+    g.font = '10px sans-serif'; g.textBaseline = 'bottom';
+    for (const [v, i, s] of tops) { if (!v) continue; g.fillStyle = s === 'L' ? '#86efac' : '#fda4af'; const t = usdM(v); const hh = v / m * bph; g.fillText(t, Math.min(bx0 + i * bbw - 8, ix + iw - 40), by1 - hh - 1); }
+    g.fillStyle = C.axis; g.textBaseline = 'top'; g.fillText(fpx(ed[0]), bx0, by1 + 3); const t2 = fpx(ed[ed.length-1]); g.fillText(t2, bx0 + bpw - g.measureText(t2).width, by1 + 3);
+    pillAt(g, xp(L.price), by1 + 9, fpx(L.price), C.yellow, '#0b0f17', 'center');
+    $('lqleg').textContent = '인셋: 청산 지도(Hyperliquid) · 아래 롱 / 위 숏 · ±15%';
+  }
+  D.geom = {pad, bw, n};
+  // ---- CVD
+  const fd = []; let a = 0; for (const b of bars) { a += 2 * b.tb - b.v; fd.push(a); }
+  const sm = new Map(D.ks.map(b => [b.t, b])); const sd = []; a = 0; let anyS = false;
+  for (const b of bars) { const s = sm.get(b.t); if (s) { a += 2 * s.tb - s.v; anyS = true; } sd.push(anyS ? a : null); }
+  const xl = []; for (let i = 1; i < n; i++) if (kst(bars[i].t).getUTCDate() !== kst(bars[i-1].t).getUTCDate()) xl.push([i, fKst(bars[i].t, 'md')]);
+  tsChart($('cvd'), {x: bars, height: 140, zero: 1, padR: 58, series: [{y: fd, color: C.blue}, {y: sd, color: C.yellow}], xlabels: xl, yfmt: v => nf(v)});
+  $('cvdv').innerHTML = `선물 <b class="${fd[n-1]>=0?'up':'dn'}">${sgn(fd[n-1])}</b> · 현물 <b class="${(sd[n-1]||0)>=0?'up':'dn'}">${sd[n-1]==null?'–':sgn(sd[n-1])}</b>`;
+  // ---- OI 변화
+  const om = new Map(D.oi.map(x => [x.t, x.oi])), P = TFMS[st.tf];
+  const NL = [], NS = [], LC = [], SC = [], OIL = []; let s1 = 0, s2 = 0, s3 = 0, s4 = 0;
+  for (const b of bars) {
+    const o0 = om.get(b.t), o1 = om.get(b.t + P); OIL.push(o1 ?? o0 ?? null);
+    if (o0 == null || o1 == null) { NL.push(0); NS.push(0); LC.push(0); SC.push(0); continue; }
+    const d = o1 - o0, r = b.v ? b.tb / b.v : .5;
+    if (d >= 0) { NL.push(d * r); NS.push(d * (1 - r)); LC.push(0); SC.push(0); s1 += d * r; s2 += d * (1 - r); }
+    else { NL.push(0); NS.push(0); LC.push(d * (1 - r)); SC.push(d * r); s3 += d * (1 - r); s4 += d * r; }
+  }
+  oiChart($('oi'), bars, NL, NS, LC, SC, OIL, xl);
+  $('oiv').innerHTML = `신규 롱 <b class="up">${nf(s1)}</b> · 신규 숏 <b class="dn">${nf(s2)}</b> · 롱 정리 ${nf(-s3)} · 숏 정리 ${nf(-s4)} · OI ${nf(OIL.filter(x=>x!=null).pop())}`;
+}
+function oiChart(cv, bars, NL, NS, LC, SC, OIL, xl){
+  const {g, w, h} = setupCanvas(cv, 150), pad = {l: 4, r: 58, t: 8, b: 20}, n = bars.length, pw = w - pad.l - pad.r, ph = h - pad.t - pad.b;
+  const up = NL.map((v, i) => v + NS[i]), dn = LC.map((v, i) => v + SC[i]);
+  const m = Math.max(...up, ...dn.map(Math.abs), 1) * 1.1, ys = v => pad.t + ph / 2 - v / m * ph / 2, bw = pw / n, xs = i => pad.l + i * bw;
+  g.strokeStyle = C.grid; g.fillStyle = C.axis; g.textBaseline = 'middle';
+  for (const t of [-m/1.1, 0, m/1.1]) { const y = ys(t); g.beginPath(); g.moveTo(pad.l, y); g.lineTo(w - pad.r, y); g.stroke(); g.fillText(sgn(t), w - pad.r + 5, y); }
+  for (let i = 0; i < n; i++) { const x = xs(i) + bw * .12, ww = Math.max(1, bw * .76);
+    g.fillStyle = C.green; g.fillRect(x, ys(NL[i]), ww, ys(0) - ys(NL[i])); g.fillStyle = C.red; g.fillRect(x, ys(up[i]), ww, ys(NL[i]) - ys(up[i]));
+    g.fillStyle = C.green + '55'; g.fillRect(x, ys(0), ww, ys(LC[i]) - ys(0)); g.fillStyle = C.red + '55'; g.fillRect(x, ys(LC[i]), ww, ys(dn[i]) - ys(LC[i])); }
+  const ov = OIL.filter(v => v != null); if (ov.length > 1) { const a = Math.min(...ov), b = Math.max(...ov), yo = v => pad.t + 4 + (b - v) / (b - a || 1) * (ph - 8);
+    g.strokeStyle = C.white; g.lineWidth = 1.3; g.beginPath(); let f = 1; OIL.forEach((v, i) => { if (v == null) return; const x = xs(i) + bw/2; f ? g.moveTo(x, yo(v)) : g.lineTo(x, yo(v)); f = 0; }); g.stroke(); g.lineWidth = 1; }
+  g.fillStyle = C.axis; g.textBaseline = 'top'; let lx = -99; for (const [i, t] of xl) { const x = xs(i); if (x - lx < 46) continue; g.fillText(t, x - 14, h - pad.b + 4); lx = x; }
+}
+
+/* ---------- 구간 요약 (5분 조각) ---------- */
+const snaps = {};
+async function pollSnaps(){
+  const c = st.coin; snaps[c] = snaps[c] || {bg: snapStore(c + ':bitget'), hl: snapStore(c + ':hl')};
+  const t = Date.now();
+  await Promise.all([bitgetOI(c + 'USDT').then(v => snaps[c].bg.add(t, v)).catch(() => {}), hlCtx(c).then(v => snaps[c].hl.add(t, v.oi)).catch(() => {})]);
+}
+function snapDelta(store, t0){
+  const a = store.all(); if (a.length < 2) return null;
+  const s = a.find(x => x.t >= t0 - 6e5), e = a[a.length - 1];
+  if (!s || s.t > t0 + 6e5 || e.t - s.t < 5 * 6e4) return null;
+  return {o0: s.oi, o1: e.oi, d: e.oi - s.oi};
+}
+async function summary(){
+  if (!D) return;
+  const c = st.coin, sym = c + 'USDT', W = st.win * 6e4;
+  await pollSnaps();
+  const [bn, by] = await Promise.all([bnOIHist(sym, '5m', 300).catch(() => null), bybitOIHist(sym, 300).catch(() => null)]);
+  const end = Math.floor(D.at / 3e5) * 3e5 - 3e5, t0 = end - W;
+  const f5 = new Map(D.f5.map(b => [b.t, b])), s5 = new Map(D.s5.map(b => [b.t, b]));
+  const ex = [], slice = new Map();
+  const addHist = (name, arr) => {
+    if (!arr || arr.length < 3) { ex.push({name, fail: true}); return; }
+    const m = new Map(arr.map(x => [Math.round(x.t / 3e5) * 3e5, x.oi]));
+    let o0 = null, o1 = null, usd = 0;
+    for (let t = t0; t < end; t += 3e5) { const a = m.get(t), b = m.get(t + 3e5); if (a == null || b == null) continue; if (o0 == null) o0 = a; o1 = b;
+      const d = b - a, px = f5.get(t)?.c || D.price; usd += d * px; const s = slice.get(t) || {d: 0, t}; s.d += d; slice.set(t, s); }
+    if (o0 == null) { ex.push({name, fail: true}); return; }
+    ex.push({name, o0, o1, d: o1 - o0, usd});
+  };
+  addHist('Binance', bn); addHist('Bybit', by);
+  for (const [name, store] of [['Bitget', snaps[c].bg], ['Hyperliquid', snaps[c].hl]]) {
+    const r = snapDelta(store, t0); if (!r) ex.push({name, fail: true, note: '기록 쌓는 중'}); else ex.push({name, ...r, usd: r.d * D.price, snap: true});
+  }
+  const ok_ = ex.filter(e => !e.fail), O0 = ok_.reduce((s, e) => s + e.o0, 0), O1 = ok_.reduce((s, e) => s + e.o1, 0), USD = ok_.reduce((s, e) => s + e.usd, 0);
+  let inc = 0, dec = 0, nl = 0, ns = 0, lc = 0, sc = 0, fT = 0, sT = 0, fV = 0, big = null, small = null, cnt = 0;
+  for (let t = t0; t < end; t += 3e5) {
+    const k = f5.get(t); if (k) { fT += 2 * k.tb - k.v; fV += k.v; } const s = s5.get(t); if (s) sT += 2 * s.tb - s.v;
+    const sl = slice.get(t); if (!sl) continue; cnt++; const r = k && k.v ? k.tb / k.v : .5;
+    if (sl.d >= 0) { inc += sl.d; nl += sl.d * r; ns += sl.d * (1 - r); } else { dec += sl.d; lc += sl.d * (1 - r); sc += sl.d * r; }
+    if (!big || sl.d > big.d) big = sl; if (!small || sl.d < small.d) small = sl;
+  }
+  const p0 = f5.get(t0)?.o, p1 = f5.get(end - 3e5)?.c ?? D.price;
+  const exMax = Math.max(...ok_.map(e => Math.abs(e.d)), 1);
+  const pctBar = (a, b, ca, cb) => `<div class="bar"><div style="width:${a/(a+b||1)*100}%;background:${ca}"></div><div style="width:${b/(a+b||1)*100}%;background:${cb}"></div></div>`;
+  $('sum').innerHTML = `
+  <div class="mu" style="font-size:12px;margin-bottom:6px">${fKst(t0)} ~ ${fKst(end,'hm')} · ${nf(st.win/60,0)}시간 · 5분 조각 ${cnt}개<br>${ok_.length}곳 합계 · ${ok_.map(e => e.name).join(' · ')}${ex.some(e=>e.fail) ? ' <span class="mu">(제외: ' + ex.filter(e=>e.fail).map(e => e.name + (e.note ? ' ' + e.note : '')).join(', ') + ')</span>' : ''}</div>
+  <div class="grid2"><div>
+    <div class="ph"><b>변화</b></div>
+    <div class="sumgrid">
+      <span class="mu">OI 변화</span><b class="${O1-O0>=0?'up':'dn'}">${sgn(O1 - O0)} ${c}</b><span class="mu">${sgn((O1/O0-1)*100,2)}%</span>
+      <span class="mu">합계 수준</span><span>${nf(O0)} → ${nf(O1)}</span><span class="mu">${c}</span>
+      <span class="mu">달러 환산</span><span>≈ ${usdM(USD)}</span><span class="mu">조각마다 그때 가격</span>
+      <span class="mu">가격</span><span>${p0 ? fpx(p0) : '–'} → ${fpx(p1)}</span><span class="${p1>=p0?'up':'dn'}">${p0 ? sgn((p1/p0-1)*100,2) + '%' : ''}</span>
+    </div>
+    <div class="ph" style="margin-top:12px"><b>늘어난 쪽과 줄어든 쪽 · 추정 · ${c}</b><span>5분 이력 있는 곳</span></div>
+    <div class="sumgrid">
+      <span class="up">늘어남</span><span>${pctBar(nl, ns, C.green, C.red)}</span><b class="up">${sgn(inc)}</b>
+      <span class="mu">신규 롱·숏</span><span class="mu">${sgn(nl)} (${nf(nl/(inc||1)*100,0)}%) · ${sgn(ns)} (${nf(ns/(inc||1)*100,0)}%)</span><span></span>
+      <span class="dn">줄어듦</span><span>${pctBar(-lc, -sc, C.green + '88', C.red + '88')}</span><b class="dn">${sgn(dec)}</b>
+      <span class="mu">롱·숏 정리</span><span class="mu">${sgn(lc)} (${nf(lc/(dec||-1)*100,0)}%) · ${sgn(sc)} (${nf(sc/(dec||-1)*100,0)}%)</span><span></span>
+    </div></div>
+  <div>
+    <div class="ph"><b>거래소별 · ${c}</b></div>
+    <div class="sumgrid">${ok_.sort((a, b) => b.d - a.d).map(e => `<span>${e.name}${e.snap ? '<span class="mu">*</span>' : ''}</span><div class="bar" style="background:transparent"><div style="width:${Math.abs(e.d)/exMax*100}%;background:${e.d>=0?C.green:C.red}"></div></div><b class="${e.d>=0?'up':'dn'}">${sgn(e.d)}</b>`).join('')}</div>
+    <div class="ph" style="margin-top:12px"><b>테이커 매수 − 매도 · ${c} · Binance</b></div>
+    <div class="sumgrid">
+      <span class="mu">선물</span><b class="${fT>=0?'up':'dn'}">${sgn(fT)}</b><span></span>
+      <span class="mu">현물</span><b class="${sT>=0?'up':'dn'}">${sgn(sT)}</b><span></span>
+      <span class="mu">선물 거래량</span><span>${nf(fV)}</span><span></span>
+      <span class="mu">가장 큰 증가</span><span>${big ? fKst(big.t) : '–'}</span><b class="up">${big ? sgn(big.d) : ''}</b>
+      <span class="mu">가장 큰 감소</span><span>${small ? fKst(small.t) : '–'}</span><b class="dn">${small ? sgn(small.d) : ''}</b>
+    </div></div></div>
+  <div class="mu" style="font-size:11px;margin-top:8px">* 이 기기에서 페이지를 열어 둔 동안 기록한 값. 처음 열면 기록이 쌓일 때까지 빠짐.</div>`;
+}
+
+function seg(id, f){ $(id).onclick = e => { const b = e.target.closest('button'); if (!b) return; for (const x of $(id).children) x.classList.toggle('on', x === b); f(b); }; }
+seg('coin', b => { st.coin = b.textContent; st.hover = null; load().catch(fail); });
+seg('tf', b => { st.tf = b.dataset.v; st.hover = null; load().catch(fail); });
+seg('nb', b => { st.nb = +b.dataset.v; st.hover = null; render(); });
+seg('lq', b => { st.liq = +b.dataset.v; render(); });
+seg('win', b => { st.win = +b.dataset.v; summary(); });
+$('main').addEventListener('pointermove', e => { if (!D?.geom) return; const r = e.target.getBoundingClientRect(), {pad, bw, n} = D.geom; const i = Math.floor((e.clientX - r.left - pad.l) / bw); st.hover = i >= 0 && i < n ? i : null; render(); });
+$('main').addEventListener('pointerleave', () => { st.hover = null; render(); });
+function fail(e){ $('sum').innerHTML = `<span class="err">Binance 선물 API 연결 실패 (${e.message}). 미국 등 일부 지역 IP에서는 막힘.</span>`; }
+addEventListener('resize', () => render());
+load().catch(fail); loadLiq();
+setInterval(() => load().catch(fail), 60e3); setInterval(loadLiq, 5 * 60e3);
+</script></body></html>

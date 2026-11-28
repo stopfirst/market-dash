@@ -1,0 +1,108 @@
+<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>지지/저항 봇</title><link rel="stylesheet" href="common.css"></head><body><div class="wrap">
+<div class="top" id="top"></div>
+<h1><span id="ttl">BTC / USDT · 내부</span> <span class="tag" style="background:#1e3a8a;color:#bfdbfe" id="tfTag">4H</span></h1>
+<div class="row"><div class="seg" id="coin"><button class="on">BTC</button><button>ETH</button><button>SOL</button></div>
+  <span class="mu" style="font-size:12px">Binance USD-M · 4H/1D 보조 → 1H 정밀화</span></div>
+<div class="panel">
+  <div class="ph"><b id="meta"></b><span id="obs"></span></div>
+  <div class="status" id="state">불러오는 중…</div>
+  <canvas id="cv"></canvas>
+</div>
+<div class="panel"><div class="ph"><b>구간 목록</b><span>원점 = 여러 타임프레임이 겹친 강한 자리 · 반응 = 한 번 이상 반응한 자리 · ★ = 가장 강함</span></div>
+  <div style="overflow-x:auto"><table id="zt"></table></div></div>
+<div class="panel"><div class="ph"><b>근접 판정 근거 · 최근 1시간 (5분봉 12개)</b><span>구간 0.6% 안으로 들어오면 판정</span></div><div id="ev" class="sumgrid"></div></div>
+<div class="foot">작동 방식: 1D·4H 스윙 고점/저점으로 수평 지지·저항 후보를 찾고 겹치는 것끼리 합친 뒤, 1H 스윙 꼬리 범위로 구간을 좁힘. 최근 72시간 동안 종가로 여러 번 관통된 구간은 약하게 봄.
+가격이 구간 0.6% 안에 오면 Binance 선물 5분 체결(테이커 매수−매도)과 OI 변화를 보고 <b>반전 후보 / 추세 지속 / 판정 보류</b>를 출력. 1분마다 다시 계산. 매매 신호가 아니라 관찰용.</div>
+</div>
+<script src="common.js"></script>
+<script>
+topbar('sr.html');
+const $ = id => document.getElementById(id);
+let coin = 'BTC', S = null;
+async function load(){
+  const sym = coin + 'USDT';
+  const [d1, h4, h1, m5, oi] = await Promise.all([bnKlines(sym,'1d',200), bnKlines(sym,'4h',300), bnKlines(sym,'1h',300), bnKlines(sym,'5m',13), bnOIHist(sym,'5m',13).catch(() => [])]);
+  const price = h1[h1.length-1].c;
+  const zones = srZones(d1, h4, h1, price);
+  const last60 = h4.slice(-60), hi = Math.max(...last60.map(b => b.h)), lo = Math.min(...last60.map(b => b.l));
+  S = {d1, h4, h1, m5, oi, price, zones, hi, lo, st: structure(h4), at: Date.now()};
+  render();
+}
+function judge(){
+  const {zones, price, m5, oi} = S;
+  let near = null, best = 1e9;
+  for (const z of zones) { const d = price > z.hi ? (price - z.hi) / price : price < z.lo ? (z.lo - price) / price : 0; if (d < best) { best = d; near = z; } }
+  const bars = m5.slice(-12), delta = bars.reduce((s, b) => s + (2 * b.tb - b.v), 0), vol = bars.reduce((s, b) => s + b.v, 0);
+  const pch = (bars[bars.length-1].c / bars[0].o - 1) * 100;
+  const oich = oi.length > 1 ? (oi[oi.length-1].oi / oi[0].oi - 1) * 100 : null;
+  const ev = {delta, vol, pch, oich, dist: best * 100, near};
+  if (!near || best > .006) return {txt: `${near ? near.name + '까지 ' + nf(best*100,1) + '% · ' : ''}${S.zones.some(z=>z.name[0]==='S') ? '지지' : ''} 조건 충족 후보 없음 · 관망`, cls: 'mu', ev};
+  const sup = near.name[0] === 'S', dr = delta / vol;
+  let txt, cls;
+  if (sup) {
+    if (price >= near.lo && dr > .04 && (oich == null || oich <= .3)) { txt = `${near.name} 지지 반응 · 매수 체결 우위, OI 정리 → 반전 후보`; cls = 'up'; }
+    else if (dr < -.04 && oich != null && oich > .2) { txt = `${near.name} 압박 · 매도 체결 + 신규 숏 유입 → 추세 지속(이탈 주의)`; cls = 'dn'; }
+    else if (price < near.lo) { txt = `${near.name} 하단 이탈 · 종가 회복 여부 확인`; cls = 'dn'; }
+    else { txt = `${near.name} 근접 · 판정 보류`; cls = 'yl'; }
+  } else {
+    if (price <= near.hi && dr < -.04 && (oich == null || oich <= .3)) { txt = `${near.name} 저항 반응 · 매도 체결 우위, OI 정리 → 반전 후보`; cls = 'dn'; }
+    else if (dr > .04 && oich != null && oich > .2) { txt = `${near.name} 돌파 시도 · 매수 체결 + 신규 롱 유입 → 추세 지속`; cls = 'up'; }
+    else if (price > near.hi) { txt = `${near.name} 상단 돌파 · 지지 전환 확인`; cls = 'up'; }
+    else { txt = `${near.name} 근접 · 판정 보류`; cls = 'yl'; }
+  }
+  return {txt, cls, ev};
+}
+function render(){
+  const {h4, price, zones} = S, J = judge();
+  $('ttl').textContent = `${coin} / USDT · 내부`;
+  const evalBar = h4[h4.length - 2];
+  $('meta').innerHTML = `범위 ${fpx(S.lo)}–${fpx(S.hi)} · ${S.st}`;
+  $('obs').innerHTML = `평가 ${fKst(evalBar.tc + 1, 'mdw')} ${fKst(evalBar.tc + 1, 'hm')} KST · 관측 ${fKst(S.at, 'hm')} KST · <b class="bl">${fpx(price)}</b>`;
+  $('state').className = 'status ' + J.cls; $('state').textContent = J.txt;
+  // 차트
+  const bars = h4.slice(-70), cv = $('cv'), {g, w, h} = setupCanvas(cv, innerWidth < 600 ? 360 : 420);
+  const pad = {l: 6, r: 62, t: 10, b: 70}, vh = 46;
+  const ph = h - pad.t - pad.b, pw = w - pad.l - pad.r - (innerWidth < 600 ? 110 : 170);
+  let lo = Math.min(...bars.map(b => b.l), ...zones.map(z => z.lo)), hi = Math.max(...bars.map(b => b.h), ...zones.map(z => z.hi));
+  const sp = hi - lo; lo -= sp * .04; hi += sp * .04;
+  const ys = v => pad.t + (hi - v) / (hi - lo) * ph, n = bars.length, bw = pw / n, xs = i => pad.l + i * bw + bw/2;
+  g.strokeStyle = C.grid; g.fillStyle = C.axis; g.textBaseline = 'middle';
+  for (const t of niceTicks(lo, hi, 5)) { const y = ys(t); g.beginPath(); g.moveTo(pad.l, y); g.lineTo(w - pad.r, y); g.stroke(); g.fillText(fpx(t), w - pad.r + 6, y); }
+  // 존
+  const labs = [];
+  for (const z of zones) {
+    const R = z.name[0] === 'R', col = R ? C.red : C.blue, y1 = ys(z.hi), y2 = ys(z.lo);
+    let x0 = pad.l; const fi = bars.findIndex(b => b.t >= z.t); if (fi > 0) x0 = xs(fi);
+    const xe = pad.l + pw + 4; g.fillStyle = col + (z.star ? '40' : '26'); g.fillRect(x0, y1, xe - x0, Math.max(2, y2 - y1));
+    if (!z.star) { g.save(); g.beginPath(); g.rect(x0, y1, xe - x0, y2 - y1); g.clip(); g.strokeStyle = col + '55'; for (let x = x0 - 40; x < w; x += 7) { g.beginPath(); g.moveTo(x, y2); g.lineTo(x + (y2 - y1), y1); g.stroke(); } g.restore(); }
+    g.strokeStyle = col; g.strokeRect(x0, y1, xe - x0, Math.max(2, y2 - y1));
+    labs.push({y: (y1 + y2) / 2, col: R ? '#ffb4c2' : '#b6ccff', a: `${z.name}${z.star ? '★' : ''} ${z.kind} ${z.tfs}`, b: `${fpx(z.lo)} ~${fpx(z.hi)}`});
+  }
+  labs.sort((p, q) => p.y - q.y); for (let i = 1; i < labs.length; i++) if (labs[i].y - labs[i-1].y < 30) labs[i].y = labs[i-1].y + 30;
+  for (const L of labs) { const lx = pad.l + pw + 8; g.fillStyle = L.col; g.font = 'bold 11px sans-serif'; g.textBaseline = 'bottom'; g.fillText(L.a, lx, L.y); g.font = '11px sans-serif'; g.textBaseline = 'top'; g.fillText(L.b, lx, L.y + 1); }
+  // 캔들
+  for (let i = 0; i < n; i++) { const b = bars[i], up = b.c >= b.o; g.strokeStyle = g.fillStyle = up ? C.teal : C.red;
+    g.beginPath(); g.moveTo(xs(i), ys(b.h)); g.lineTo(xs(i), ys(b.l)); g.stroke();
+    const y1 = ys(Math.max(b.o, b.c)), y2 = ys(Math.min(b.o, b.c)); g.fillRect(xs(i) - bw * .35, y1, bw * .7, Math.max(1, y2 - y1)); }
+  // 거래량
+  const vmax = Math.max(...bars.map(b => b.v)), vy0 = h - 22;
+  for (let i = 0; i < n; i++) { const b = bars[i], vh2 = b.v / vmax * vh; g.fillStyle = (b.c >= b.o ? C.teal : C.red) + '88'; g.fillRect(xs(i) - bw * .35, vy0 - vh2, bw * .7, vh2); }
+  g.fillStyle = C.axis; g.textBaseline = 'top'; g.font = '11px sans-serif'; let lastD = '';
+  for (let i = 0; i < n; i++) { const d = fKst(bars[i].t, 'md'); if (d !== lastD && kst(bars[i].t).getUTCHours() < 4) { if (i > 2 && i < n - 2 && (i % (innerWidth < 600 ? 2 : 1) === 0)) g.fillText(d.replace('/', '.'), xs(i) - 12, vy0 + 6); lastD = d; } }
+  g.fillText('KST', w - pad.r + 6, vy0 + 6);
+  pillAt(g, w - pad.r + 2, ys(price), fpx(price), C.blue, '#fff');
+  // 표
+  $('zt').innerHTML = '<tr><th>구간</th><th>성격</th><th>타임프레임</th><th>하단</th><th>상단</th><th>거리</th><th>점수</th></tr>' +
+    zones.slice().sort((a, b) => b.hi - a.hi).map(z => `<tr><td class="${z.name[0]==='R'?'dn':'bl'}">${z.name}${z.star?' ★':''}</td><td>${z.kind}</td><td>${z.tfs}</td><td>${fpx(z.lo)}</td><td>${fpx(z.hi)}</td><td>${sgn(((z.name[0]==='R'?z.lo:z.hi)/price-1)*100,1)}%</td><td>${nf(z.score,1)}</td></tr>`).join('');
+  const e = J.ev;
+  $('ev').innerHTML = `<span class="mu">가장 가까운 구간</span><span>${e.near ? e.near.name + ' · ' + nf(e.dist,2) + '%' : '–'}</span><span></span>
+    <span class="mu">테이커 매수−매도</span><span class="${e.delta>=0?'up':'dn'}">${sgn(e.delta, coin==='BTC'?0:0)} ${coin}</span><span class="mu">${nf(e.delta/e.vol*100,1)}% of 거래량</span>
+    <span class="mu">OI 변화</span><span class="${(e.oich||0)>=0?'up':'dn'}">${e.oich==null?'–':sgn(e.oich,2)+'%'}</span><span class="mu">Binance</span>
+    <span class="mu">가격 변화</span><span class="${e.pch>=0?'up':'dn'}">${sgn(e.pch,2)}%</span><span class="mu">1시간</span>`;
+}
+$('coin').onclick = e => { const b = e.target.closest('button'); if (!b) return; for (const x of $('coin').children) x.classList.toggle('on', x === b); coin = b.textContent; load().catch(err); };
+function err(e){ $('state').innerHTML = '<span class="err">Binance 선물 API 연결 실패: ' + e.message + '</span>'; }
+addEventListener('resize', () => S && render());
+load().catch(err); setInterval(() => load().catch(err), 60e3);
+</script></body></html>

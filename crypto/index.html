@@ -1,0 +1,23 @@
+<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>TRADING DESK · 크립토</title><link rel="stylesheet" href="common.css">
+<style>.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:10px}.card{display:block;text-decoration:none;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px}.card b{font-size:15px}.card p{color:var(--mute);font-size:12.5px;line-height:1.55;margin:6px 0 10px}.card .v{font-size:13px}</style></head><body><div class="wrap">
+<div class="top" id="top"></div>
+<h1>크립토 데스크 <small>BTC 포지션 · 유동성</small></h1>
+<div class="cards">
+  <a class="card" href="liq.html"><b>청산 지도</b><p>하이퍼리퀴드 포지션의 청산가를 0.5% 가격대별로 합산. 아래 롱 / 위 숏, 누적 합, 대형 포지션 목록.</p><div class="v" id="v1">–</div></a>
+  <a class="card" href="desk.html"><b>분석 데스크</b><p>Binance 선물 캔들 + 지지/저항·FVG + 매물대 + 청산 지도 인셋, CVD, OI 변화 추정(신규 롱/숏·정리), 5곳 OI 구간 요약.</p><div class="v" id="v2">–</div></a>
+  <a class="card" href="stable.html"><b>스테이블코인 공급량</b><p>DefiLlama 달러 스테이블코인 총공급, 하루·7일·30일 변화와 1년 중 순위.</p><div class="v" id="v3">–</div></a>
+  <a class="card" href="sr.html"><b>지지/저항 봇</b><p>1D·4H 구조로 수평 구간을 찾고 1H로 좁힌 뒤, 가격이 근접하면 체결·OI로 반전 후보/추세 지속/판정 보류를 출력.</p><div class="v mu">Binance USD-M</div></a>
+</div>
+<div class="foot">← <a href="../sector-dashboard.html">미국 섹터 대시보드</a> · <a href="../macro.html">매크로</a></div>
+</div>
+<script src="common.js"></script>
+<script>
+topbar('index.html');
+loadLiq().then(j => { const c = j.coins.BTC; const k = Math.round(.2 / j.step), m = c.long.length / 2;
+  const L = c.long.slice(m - k, m).reduce((a, b) => a + b, 0), S = c.short.slice(m, m + k).reduce((a, b) => a + b, 0);
+  document.getElementById('v1').innerHTML = `BTC ${fpx(c.price)} · 아래 20% 롱 <b class="bl">${usdKo(L)}</b> · 위 20% 숏 <b class="dn">${usdKo(S)}</b> <span class="mu">(${fKst(j.updated*1000,'hm')})</span>`; }).catch(() => {});
+getJSON('https://stablecoins.llama.fi/stablecoincharts/all').then(d => { const v = d.map(x => +((x.totalCirculatingUSD||{}).peggedUSD||0)).filter(Boolean), L = v.length - 1;
+  document.getElementById('v3').innerHTML = `총공급 ${nf(v[L]/1e8,0)}억 달러 · 7일 <b class="${v[L]-v[L-7]>=0?'up':'dn'}">${sgn((v[L]-v[L-7])/1e8,1)}억</b> · 30일 <b class="${v[L]-v[L-30]>=0?'up':'dn'}">${sgn((v[L]-v[L-30])/1e8,0)}억</b>`; }).catch(() => {});
+getJSON(`${FAPI}/fapi/v1/ticker/24hr?symbol=BTCUSDT`).then(t => document.getElementById('v2').innerHTML = `BTC ${fpx(+t.lastPrice)} · 24시간 <b class="${+t.priceChangePercent>=0?'up':'dn'}">${sgn(+t.priceChangePercent,1)}%</b>`).catch(() => {});
+</script></body></html>
