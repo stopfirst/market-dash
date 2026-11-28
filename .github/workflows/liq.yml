@@ -1,6 +1,8 @@
 name: liq-map
 # 하이퍼리퀴드 청산 지도 (crypto/liq.html) — 30분마다.
 # 결과 liq.json 은 main 이 아니라 'liq-data' 브랜치에 한 커밋으로 덮어써서(force) main 기록을 더럽히지 않는다.
+# GitHub cron은 이 저장소에서 몇 시간씩 밀리거나 빠지므로, 실행이 끝나면 스스로 다음 실행을 띄운다(자가 연쇄).
+# cron은 연쇄가 끊겼을 때 다시 살리는 예비. 공개 저장소라 Actions 시간은 무료.
 # 지갑 주소 목록은 actions/cache 로 실행 사이에 유지 → 실행이 쌓일수록 반영 비율이 오른다.
 on:
   schedule:
@@ -9,6 +11,7 @@ on:
 
 permissions:
   contents: write
+  actions: write
 
 concurrency:
   group: liq-map
@@ -49,3 +52,8 @@ jobs:
           git add liq.json
           git commit -q -m "liq $(date -u +%FT%TZ)"
           git push -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" liq-data
+      - name: 다음 실행 예약 (자가 연쇄)
+        if: always() && github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run liq.yml --ref main -R ${{ github.repository }}
